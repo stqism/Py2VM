@@ -84,35 +84,23 @@ def bytecode_optimize(bytecode):
     return bytecode_list
 
 
-    #code = code.replace(';','\n')
-    #code = code.replace('{',':')
-    #code = code.replace('}','\n')
-    bytecode = compile(code, '<none>', 'exec')
-
 def py2vm(code):
-    #code = code.replace(';','\n')
-    #code = code.replace('{',':')
-    #code = code.replace('}','\n')
     bytecode = compile(code, '<none>', 'exec')
     log = StringIO.StringIO()
-    ir = StringIO.StringIO()
     # print binascii.b2a_hex(bytecode.co_code)
     log.write(code)
     log.write('=>\n')
-    opcode = dis.dis(bytecode)
-    log.write(opcode)
-    log.write('=>\n')
+    #opcode = dis.dis(bytecode)
+    # log.write(opcode)
+    # log.write('=>\n')
     const_stack = []
     jump = 0
-
-    ir.write('target triple = "x86_64-apple-macosx10.10.0"')
+    libc = CDLL("/usr/lib/libc.dylib")
 
     __INTERNAL__DEBUG_LOG = 0
     __INTERNAL__DEBUG_LOG_CONST = 0
     __INTERNAL__DEBUG_LOG_VAR = 0
     name_dict = {1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9, 0: 0}
-    function_arg_dict = {}
-    hook = ''
 
     # I was inspired by str8C
     i = -1
@@ -189,10 +177,6 @@ def py2vm(code):
 
         elif opcode_value == 'STORE_NAME':
             name_dict[arg] = const_stack[0]
-
-            if bytecode.co_names[arg] == 'main':
-                hook = const_stack[0]
-
             if bytecode.co_names[arg] == '__INTERNAL__DEBUG_LOG':
                 __INTERNAL__DEBUG_LOG = name_dict[arg]
 
@@ -440,12 +424,29 @@ def py2vm(code):
             math0 = const_stack.pop(0)
             const_stack.insert(0, getattr(math0, bytecode.co_names[arg]))
 
-        elif opcode_value == 'MAKE_FUNCTION':
-            function_arg_dict[const_stack[0]] = arg
-
         elif opcode_value == 'CALL_FUNCTION':
-            print const_stack[arg]
-            exec const_stack[0]
+            try:
+                function = bytecode.co_names[const_stack[arg]]
+            except:
+                function = const_stack[arg]
+            arguments = []
+
+            for tick in xrange(0, arg):
+                arguments.insert(0, const_stack[tick])
+
+            if function == 'load.library':
+                const_stack.insert(0, CDLL(arguments[0]))
+                # print dir(const_stack[0])
+
+            elif function == '__INTERNAL__libc':
+                const_stack.insert(0, libc)
+
+            else:
+                try:
+                    lookup = const_stack[1](const_stack[0])
+                    const_stack.insert(0, lookup)
+                except:
+                    print const_stack
 
         elif opcode_value == 'RETURN_VALUE':
 
@@ -457,24 +458,15 @@ def py2vm(code):
             log.write("unknown opcode: %s\n" % (opcode_value))
 
     i += 1
-    exec hook
     return log.getvalue()
 
 code = """
-i = 1
+__INTERNAL__DEBUG_LOG=1
+__INTERNAL__DEBUG_LOG_CONST=0
 
-def zero():
-    print 'no'
-def one():
-    print 'yes'
-def el():
-    print 'yolo'
-
-check = {
-    0:zero,1:one,2:el
-    }
-
-check[i]()
+print i
+print i
+print i
 
 """
 
