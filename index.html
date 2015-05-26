@@ -12,46 +12,50 @@
 
   </head>
   <body>
-    <section class="page-header modal">
+<div class="alert alert-warning center">
+    <strong>Caution!</strong> This page is still under development.
+</div>
+
+    <section class="page-header modal modal-content">
       <h1 class="project-name">XN</h1>
       <h2 class="project-tagline">Various internal projects</h2>
     </section>
 
-    <section class="main-content modal-content">
+    <section class="main-content modal-content jumbotron">
 <h3>Tox
-  <a href="https://github.com/Tox"><span class="icon-right mdi mdi-source-fork btn btn-flat btn-info"></span></a>
-  <a href="https://tox.im"><span class="icon-right mdi mdi-eye btn btn-flat btn-info"></span></a>
+  <a href="https://github.com/Tox"><button class="icon-right mdi mdi-source-fork btn btn-flat btn-info"></button></a>
+  <a href="https://tox.im"><button class="icon-right mdi mdi-eye btn btn-flat btn-info"></button></a>
 </h3>
 
 <p>Distributed skype replacement</p>
 
       <h3>Py2VM
-        <a href="https://github.com/stqism/py2vm"><span class="icon-right mdi mdi-source-fork btn btn-flat btn-info"></span></a>
-        <a href="http://c.x-n.su"><span class="icon-right mdi mdi-eye btn btn-flat btn-info"></span></a>
+        <a href="https://github.com/stqism/py2vm"><button class="icon-right mdi mdi-source-fork btn btn-flat btn-info"></button></a>
+        <a href="http://c.x-n.su"><button class="icon-right mdi mdi-eye btn btn-flat btn-info"></button></a>
       </h3>
 
 <p>Tiny Python VM being run in the web, written as a joke.</p>
 
 <h3>the_kgb
-  <a href="https://github.com/stqism/the_kgb"><span class="icon-right mdi mdi-source-fork btn btn-flat btn-info"></span></a>
+  <a href="https://github.com/stqism/the_kgb"><button class="icon-right mdi mdi-source-fork btn btn-flat btn-info"></button></a>
 </h3>
 
 <p>Modular IRC bot based off a microkernel</p>
 
 <h3>OSIRIS
-  <a href="https://github.com/stqism/osiris"><span class="icon-right mdi mdi-source-fork btn btn-flat btn-info"></span></a>
+  <a href="https://github.com/stqism/osiris"><button class="icon-right mdi mdi-source-fork btn btn-flat btn-info"></button></a>
 </h3>
 
 <p>Scalable Python application server, built on ease of expansion</p>
 
 <h3>Sunshine OS
-  <a href="https://github.com/Sunshine-OS"><span class="icon-right mdi mdi-source-fork btn btn-flat btn-info"></span></a>
+  <a href="https://github.com/Sunshine-OS"><button class="icon-right mdi mdi-source-fork btn btn-flat btn-info"></button></a>
 </h3>
 
 <p>Solaris userland on FreeBSD</p>
 
 <h3>UNGLinux
-<a href="https://github.com/unglinux"><span class="icon-right mdi mdi-source-fork btn btn-flat btn-info"></span></a>
+<a href="https://github.com/unglinux"><button class="icon-right mdi mdi-source-fork btn btn-flat btn-info"></button></a>
 </h3>
 
 <p>GNU free Linux</p>
@@ -80,9 +84,6 @@
 var options = {
   bg: '#03A9F4',
 
-  // leave target blank for global nanobar
-  target: document.getElementById('myDivId'),
-
   // id for new nanobar
   id: 'mynano'
 };
@@ -101,7 +102,10 @@ var nanobar = new Nanobar( options );
 
     // Trigger bar when exiting the page
     jQuery(window).unload(function () {
-        $(".se-pre-con").fadeOut("slow");
+        nanobar.go(100);
+    });
+
+    jQuery(window).click(function () {
         nanobar.go(100);
     });
 
