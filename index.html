@@ -6,7 +6,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/3.0.3/normalize.min.css" media="screen">
     <link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-material-design/0.3.0/css/material.min.css">
-    <link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/nprogress/0.1.6/nprogress.min.css">
     <link href='http://fonts.googleapis.com/css?family=Roboto' rel='stylesheet' type='text/css'>
     <link rel="stylesheet" type="text/css" href="css/stylesheet.css" media="screen">
     <link rel="stylesheet" type="text/css" href="css/materialdesignicons.min.css" media="all">
@@ -73,29 +72,37 @@
 <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.5.2/jquery.min.js"></script>
 <script src="http://cdnjs.cloudflare.com/ajax/libs/modernizr/2.8.2/modernizr.js" async></script>
 <script src="http://cdnjs.cloudflare.com/ajax/libs/modernizr/2.8.2/modernizr.js"></script>
-<script src="http://cdnjs.cloudflare.com/ajax/libs/nprogress/0.1.6/nprogress.min.js"></script>
+<script src="http://cdnjs.cloudflare.com/ajax/libs/nanobar/0.2.1/nanobar.min.js"></script>
 <script src="http://cdnjs.cloudflare.com/ajax/libs/instantclick/3.0.1/instantclick.min.js" data-no-instant></script>
 
 <script>
 
-    // Start
-    NProgress.start();
-    InstantClick.init();
+var options = {
+  bg: '#03A9F4',
 
-    // Increase randomly
-    var interval = setInterval(function() { NProgress.inc(); }, 1000);        
+  // leave target blank for global nanobar
+  target: document.getElementById('myDivId'),
+
+  // id for new nanobar
+  id: 'mynano'
+};
+
+var nanobar = new Nanobar( options );
+
+    // Start
+    nanobar.go(100);
+    InstantClick.init();      
 
     // Trigger finish when page fully loaded
     jQuery(window).load(function () {
-        $(".se-pre-con").fadeOut("slow");;
-        clearInterval(interval);
-        NProgress.done();
+        $(".se-pre-con").fadeOut("slow");
+        nanobar.go(0);
     });
 
     // Trigger bar when exiting the page
     jQuery(window).unload(function () {
-        $(".se-pre-con").fadeOut("slow");;
-        NProgress.start();
+        $(".se-pre-con").fadeOut("slow");
+        nanobar.go(100);
     });
 
 </script>
