@@ -7,7 +7,7 @@ body {
   font-family: 'Roboto', sans-serif;
   font-size: 16px;
   line-height: 1.5;
-  background: url(../img/bg.jpg) no-repeat 0 0;
+  background: url(../img/bg_1920.jpg) no-repeat 0 0;
   background-attachment: fixed;
   background-size: cover;
   color: #606c71; }
@@ -223,15 +223,7 @@ a {
   .vert-center {
     position: relative;
     top: 50%;
-    transform: translateY(30%);
-  }
-}
-
-@media screen and (min-height: 1300px) {
-  .vert-center {
-    position: relative;
-    top: 50%;
-    transform: translateY(30%);
+    transform: translateY(10%);
   }
 }
 
