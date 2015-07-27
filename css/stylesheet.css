@@ -62,9 +62,11 @@ a {
 .page-header {
   color: #fff;
   width:100%;
+  height:150px;
   text-align: center;
   background-color: #000000;
   opacity: 0.75;
+  position:fixed;
 }
 
 .center {
@@ -220,15 +222,33 @@ a {
   border: 0; }
 
 .vert-center {
+  position: relative;
   text-align: center;
+  top: 50%;
+  transform: translateY(150px);
 }
 
-@media screen and (min-width: 1900px) {
+@media screen and (min-width: 1000px) {
   .vert-center {
     position: relative;
     text-align: center;
     top: 50%;
-    transform: translateY(10%);
+    transform: translateY(250px);
+  }
+  .page-header {
+    height:250px;
+  }
+}
+
+@media screen and (min-width: 1600px) {
+  .vert-center {
+    position: relative;
+    text-align: center;
+    top: 50%;
+    transform: translateY(80%);
+  }
+  .page-header {
+    height:300px;
   }
 }
 
