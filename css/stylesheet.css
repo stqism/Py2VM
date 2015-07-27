@@ -228,6 +228,10 @@ a {
   transform: translateY(150px);
 }
 
+.btn-desktop {
+  background-position: center;
+}
+
 @media screen and (min-width: 1000px) {
   .vert-center {
     position: relative;
@@ -237,6 +241,11 @@ a {
   }
   .page-header {
     height:250px;
+  }
+  .btn-desktop {
+    float: right;
+    position: absolute;
+    right: 0px;
   }
 }
 
@@ -249,6 +258,11 @@ a {
   }
   .page-header {
     height:300px;
+  }
+  .btn-desktop {
+    float: right;
+    position: absolute;
+    right: 0px;
   }
 }
 
