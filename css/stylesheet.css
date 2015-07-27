@@ -7,6 +7,9 @@ body {
   font-family: 'Roboto', sans-serif;
   font-size: 16px;
   line-height: 1.5;
+  background: url(../img/bg.jpg) no-repeat 0 0;
+  background-attachment: fixed;
+  background-size: cover;
   color: #606c71; }
 
 a {
@@ -60,9 +63,8 @@ a {
   color: #fff;
   width:100%;
   text-align: center;
-  background-color: #159957;
-  background: url(https://unsplash.imgix.net/photo-1433840496881-cbd845929862?q=75&fm=jpg&w=1080&fit=max&s=daf59cf6d8eaaa0ace705f41264d320f) no-repeat 0 0 scroll;;
-  background-size: 100% 1000px;
+  background-color: #000000;
+  opacity: 0.75;
 }
 
 .center {
@@ -216,6 +218,22 @@ a {
   margin: 1rem 0;
   background-color: #eff0f1;
   border: 0; }
+
+@media screen and (min-width: 1900px) {
+  .vert-center {
+    position: relative;
+    top: 50%;
+    transform: translateY(30%);
+  }
+}
+
+@media screen and (min-height: 1300px) {
+  .vert-center {
+    position: relative;
+    top: 50%;
+    transform: translateY(30%);
+  }
+}
 
 @media screen and (min-width: 64em) {
   .main-content {
