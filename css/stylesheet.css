@@ -219,9 +219,14 @@ a {
   background-color: #eff0f1;
   border: 0; }
 
+.vert-center {
+  text-align: center;
+}
+
 @media screen and (min-width: 1900px) {
   .vert-center {
     position: relative;
+    text-align: center;
     top: 50%;
     transform: translateY(10%);
   }
