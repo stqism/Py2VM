@@ -18,7 +18,7 @@
     </noscript>
 
   </head>
-  <body>
+  <body id="body">
 
     <section class="page-header modal modal-content">
       <h1 class="project-name">XN</h1>
@@ -39,7 +39,7 @@
         </div>
       </a>
         <div class="list-group-separator"></div>
-      <a href='#projects'>
+      <a href='#projects' rel=external>
         <div class="list-group-item">
             <div class="row-action-primary">
                 <i class="mdi-action-work"></i>
@@ -51,7 +51,7 @@
         </div>
       </a>
         <div class="list-group-separator"></div>
-      <a href='#talks'>
+      <a href='#talks' rel=external>
         <div class="list-group-item">
             <div class="row-action-primary">
                 <i class="mdi-action-speaker-notes"></i>
@@ -77,8 +77,9 @@
     </div>
 </section>
 
-<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.5.2/jquery.min.js"></script>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.4/jquery.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/nanobar/0.2.1/nanobar.min.js"></script>
+<script src="https://ajax.googleapis.com/ajax/libs/jquerymobile/1.4.5/jquery.mobile.min.js"></script>
 
 <script>
 window.onhashchange = newpage;
@@ -86,11 +87,20 @@ if (location.hash != '') {
   newpage();
 }
 
+$('#body').on("swiperight",function(){
+  history.back()
+});
+
+$('#body').on("swipeleft",function(){
+  history.forward()
+});
+
 function newpage() {
     if (location.hash == '') {
       $('#tag').load("index.html #tag");
       $('#list').load("index.html #list");
     } else {
+
       $('#tag').load(location.hash.slice( 1 ) + ".html #tag");
       $('#list').load(location.hash.slice( 1 ) + ".html #list");
     }

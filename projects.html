@@ -54,7 +54,7 @@
 
         <div class="list-group-item">
           <h3 class="list-group-item-heading">the_kgb
-            <a href="#kgb"><button class="mdi-notification-vpn-lock btn btn-info btn-desktop"></button></a>
+            <a href="#kgb" rel=external><button class="mdi-notification-vpn-lock btn btn-info btn-desktop"></button></a>
             <a href="https://github.com/stqism/the_kgb"><button class="mdi-editor-merge-type btn btn-info btn-desktop"></button></a>
           </h3>
           <div class="row-content">
@@ -99,23 +99,6 @@
 
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.5.2/jquery.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/nanobar/0.2.1/nanobar.min.js"></script>
-
-<script>
-window.onhashchange = newpage;
-if (location.hash != '') {
-  newpage();
-}
-
-function newpage() {
-    if (location.hash == '') {
-      $('#tag').load("index.html #tag");
-      $('#list').load("index.html #list");
-    } else {
-      $('#tag').load(location.hash.slice( 1 ) + ".html #tag");
-      $('#list').load(location.hash.slice( 1 ) + ".html #list");
-    }
-};
-</script>
 
 <script>
 var options={bg:'#03A9F4',id:'mynano'};var nanobar=new Nanobar(options);nanobar.go(100);jQuery(window).load(function(){nanobar.go(0)});jQuery(window).unload(function(){nanobar.go(100)});jQuery(window).click(function(){nanobar.go(100)});
