@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <title>XN</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-
     <script>
     function loadCSS(href,before,media,callback){"use strict";var ss=window.document.createElement("link");var ref=before||window.document.getElementsByTagName("script")[0];var sheets=window.document.styleSheets;ss.rel="stylesheet";ss.href=href;ss.media="only x";if(callback){ss.onload=callback}ref.parentNode.insertBefore(ss,ref);ss.onloadcssdefined=function(cb){var defined;for(var i=0;i<sheets.length;i++){if(sheets[i].href&&sheets[i].href===ss.href){defined=true}}if(defined){cb()}else{setTimeout(function(){ss.onloadcssdefined(cb)})}};ss.onloadcssdefined(function(){ss.media=media||"all"});return ss}
     loadCSS("css/stylesheet.css");
@@ -19,15 +18,16 @@
     </noscript>
 
   </head>
+  <body>
 
     <section class="page-header modal modal-content">
       <h1 class="project-name">XN</h1>
-      <h2 class="project-tagline">Various projects</h2>
+      <h2 class="project-tagline" id="tag">Various projects</h2>
     </section>
 
     <section class="main-content modal-content jumbotron vert-center">
 
-      <div class="list-group">
+      <div class="list-group" id="list">
         <div class="list-group-item">
           <h3 class="list-group-item-heading">ToxMe
             <a href="https://toxme.se"><button class="mdi-notification-vpn-lock btn btn-info btn-desktop"></button></a>
@@ -54,7 +54,7 @@
 
         <div class="list-group-item">
           <h3 class="list-group-item-heading">the_kgb
-            <a href="kgb.html"><button class="mdi-notification-vpn-lock btn btn-info btn-desktop"></button></a>
+            <a href="#kgb"><button class="mdi-notification-vpn-lock btn btn-info btn-desktop"></button></a>
             <a href="https://github.com/stqism/the_kgb"><button class="mdi-editor-merge-type btn btn-info btn-desktop"></button></a>
           </h3>
           <div class="row-content">
@@ -99,6 +99,23 @@
 
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.5.2/jquery.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/nanobar/0.2.1/nanobar.min.js"></script>
+
+<script>
+window.onhashchange = newpage;
+if (location.hash != '') {
+  newpage();
+}
+
+function newpage() {
+    if (location.hash == '') {
+      $('#tag').load("index.html #tag");
+      $('#list').load("index.html #list");
+    } else {
+      $('#tag').load(location.hash.slice( 1 ) + ".html #tag");
+      $('#list').load(location.hash.slice( 1 ) + ".html #list");
+    }
+};
+</script>
 
 <script>
 var options={bg:'#03A9F4',id:'mynano'};var nanobar=new Nanobar(options);nanobar.go(100);jQuery(window).load(function(){nanobar.go(0)});jQuery(window).unload(function(){nanobar.go(100)});jQuery(window).click(function(){nanobar.go(100)});
