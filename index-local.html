@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <meta charset="UTF-8">
+    <title>XN</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script>
+    function loadCSS(href,before,media,callback){"use strict";var ss=window.document.createElement("link");var ref=before||window.document.getElementsByTagName("script")[0];var sheets=window.document.styleSheets;ss.rel="stylesheet";ss.href=href;ss.media="only x";if(callback){ss.onload=callback}ref.parentNode.insertBefore(ss,ref);ss.onloadcssdefined=function(cb){var defined;for(var i=0;i<sheets.length;i++){if(sheets[i].href&&sheets[i].href===ss.href){defined=true}}if(defined){cb()}else{setTimeout(function(){ss.onloadcssdefined(cb)})}};ss.onloadcssdefined(function(){ss.media=media||"all"});return ss}
+    loadCSS("css/stylesheet.css");
+    loadCSS("css/material.min.css");
+    loadCSS("css/font.min.css");
+    </script>
+
+    <noscript>
+      <link rel="stylesheet" type="text/css" href="css/material.min.css">
+      <link href='css/font.min.css' rel='stylesheet' type='text/css'>
+      <link rel="stylesheet" type="text/css" href="css/stylesheet.css" media="screen">
+    </noscript>
+
+  </head>
+  <body id="body">
+
+    <section class="page-header modal modal-content">
+      <h1 class="project-name">XN</h1>
+      <h2 class="project-tagline" id="tag">Why are names so hard?</h2>
+    </section>
+
+<section class="main-content modal-content jumbotron vert-center">
+    <div class="list-group" id="list">
+      <a href='https://medium.com/@SeanQ'>
+        <div class="list-group-item">
+            <div class="row-action-primary">
+                <i class="mdi-maps-local-airport"></i>
+            </div>
+            <div class="row-content">
+                <h4 class="list-group-item-heading">Traveling</h4>
+                <p class="list-group-item-text">My many adventures</p>
+            </div>
+        </div>
+      </a>
+        <div class="list-group-separator"></div>
+      <a href='#projects' rel=external>
+        <div class="list-group-item">
+            <div class="row-action-primary">
+                <i class="mdi-action-work"></i>
+            </div>
+            <div class="row-content">
+                <h4 class="list-group-item-heading">Projects</h4>
+                <p class="list-group-item-text">Various projects</p>
+            </div>
+        </div>
+      </a>
+        <div class="list-group-separator"></div>
+      <a href='#talks' rel=external>
+        <div class="list-group-item">
+            <div class="row-action-primary">
+                <i class="mdi-action-speaker-notes"></i>
+            </div>
+            <div class="row-content">
+                <h4 class="list-group-item-heading">Talks</h4>
+                <p class="list-group-item-text">Slideshows from various talks I've given</p>
+            </div>
+        </div>
+      </a>
+        <div class="list-group-separator"></div>
+      <a href='mailto:sean@x-n.su'>
+        <div class="list-group-item">
+            <div class="row-action-primary">
+                <i class="mdi-content-mail"></i>
+            </div>
+            <div class="row-content">
+                <h4 class="list-group-item-heading">Contact</h4>
+                <p class="list-group-item-text">Getting in touch with me</p>
+            </div>
+        </div>
+      </a>
+    </div>
+</section>
+
+<script src="js/jquery.min.js"></script>
+<script src="js/nanobar.min.js"></script>
+<script src="js/jquery.mobile.custom.min.js" async></script>
+<script src="js/newpage.min.js" async></script>
+
+  </body>
+</html>
