@@ -9,7 +9,17 @@ $('#body').on("swiperight",function(){
 });
 
 $('#body').on("swipeleft",function(){
-  history.forward()	
+  history.forward()
+});
+
+$('a').each(function(){
+    var link = $(this).attr('href');
+
+    if (link.match(/^\//)) {
+      var list = link.split('/');
+      var hash = '#' + list[list.length - 1].split('.')[0];
+      $(this).attr('href', hash);
+    }
 });
 
 function newpage() {
