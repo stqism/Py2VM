@@ -61,8 +61,6 @@ def bytecode_optimize(bytecode):
     bytecode_list = []
     skipme = False
 
-    print bytecode
-
     for opcode, arg in item_arg(bytecode.co_code):
         if skipme == True:
             skipme = False
@@ -98,20 +96,22 @@ def py2vm(bytecode, stack=False, rec_log=False):
         # print binascii.b2a_hex(bytecode.co_code)
         log.write(code)
         log.write('=>\n')
-        opcode = dis.dis(bytecode)    #Prints out summary of opcodes
-        log.write(opcode)
-        log.write('=>\n')
+        #opcode = dis.dis(bytecode)    #Prints out summary of opcodes
+        #log.write(opcode)
+        #log.write('=>\n')
 
     if stack != False:
         const_stack = stack
     else:
         const_stack = []
 
+    fastload = None
+
     jump = 0
 
     codeload = None
 
-    __INTERNAL__DEBUG_LOG = 0
+    __INTERNAL__DEBUG_LOG = 1
     __INTERNAL__DEBUG_LOG_CONST = 0
     __INTERNAL__DEBUG_LOG_VAR = 0
     __INTERNAL__UNSAFE_FUNCTION = 0
@@ -183,12 +183,25 @@ def py2vm(bytecode, stack=False, rec_log=False):
                 log.write(
                     'DEBUG => loaded %s on to stack\n' % (bytecode.co_consts[arg]))
 
+        elif opcode_value == 'LOAD_FAST':
+            const_stack.insert(0, fastload)
+
+            if __INTERNAL__DEBUG_LOG:
+                log.write(
+                    'DEBUG => loaded %s on to stack\n' % (fastload))
+
         elif opcode_value == 'LOAD_NAME':
             const_stack.insert(0, name_dict[arg])
 
             if __INTERNAL__DEBUG_LOG:
                 log.write('DEBUG => loaded %s on to stack\n' %
                           (name_dict[arg]))
+
+        elif opcode_value == 'STORE_FAST':
+            fastload = const_stack[0]
+
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => set fastload to %s\n" % (const_stack[0]))
 
         elif opcode_value == 'STORE_NAME':
             name_dict[arg] = const_stack[0]
@@ -450,6 +463,21 @@ def py2vm(bytecode, stack=False, rec_log=False):
             codeload = const_stack[0]
 
         elif opcode_value == 'CALL_FUNCTION':
+
+            arglist = []
+            argcount = 0
+
+            for item in const_stack:
+                if type(item) is str or type(item) is int or type(item) is float:    #hack as code isn't a readable type
+                    arglist.append(item)
+                    argcount += 1
+                else:
+                    break
+
+            del const_stack[:argcount]
+
+            print i
+
             try:
                 function = bytecode.co_names[const_stack[arg]]
             except:
@@ -493,11 +521,12 @@ __INTERNAL__DEBUG_LOG=1
 __INTERNAL__UNSAFE_FUNCTION=0
 __INTERNAL__DEBUG_LOG_CONST=0
 
-def test():
-    return 'this second'
+def test(order):
+    __INTERNAL__DEBUG_LOG=1
+    return order
 
 print 'This comes first'
-print test()
+print test('second')
 print 'and I am third'
 """
 
