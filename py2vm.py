@@ -60,6 +60,9 @@ def item_arg(some_iterable):
 def bytecode_optimize(bytecode):
     bytecode_list = []
     skipme = False
+
+    print bytecode
+
     for opcode, arg in item_arg(bytecode.co_code):
         if skipme == True:
             skipme = False
@@ -83,23 +86,35 @@ def bytecode_optimize(bytecode):
                 bytecode_list.append([opcode_value, 0])
     return bytecode_list
 
+def buildcode(code):
+    return py2vm(compile(code, '<none>', 'exec'))
 
-def py2vm(code):
-    bytecode = compile(code, '<none>', 'exec')
-    log = StringIO.StringIO()
-    # print binascii.b2a_hex(bytecode.co_code)
-    log.write(code)
-    log.write('=>\n')
-    #opcode = dis.dis(bytecode)
-    # log.write(opcode)
-    # log.write('=>\n')
-    const_stack = []
+def py2vm(bytecode, stack=False, rec_log=False):
+
+    if rec_log != False:
+        log = rec_log
+    else:
+        log = StringIO.StringIO()
+        # print binascii.b2a_hex(bytecode.co_code)
+        log.write(code)
+        log.write('=>\n')
+        opcode = dis.dis(bytecode)    #Prints out summary of opcodes
+        log.write(opcode)
+        log.write('=>\n')
+
+    if stack != False:
+        const_stack = stack
+    else:
+        const_stack = []
+
     jump = 0
-    libc = CDLL("/usr/lib/libc.dylib")
+
+    codeload = None
 
     __INTERNAL__DEBUG_LOG = 0
     __INTERNAL__DEBUG_LOG_CONST = 0
     __INTERNAL__DEBUG_LOG_VAR = 0
+    __INTERNAL__UNSAFE_FUNCTION = 0
     name_dict = {1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9, 0: 0}
 
     # I was inspired by str8C
@@ -197,6 +212,13 @@ def py2vm(code):
                 if __INTERNAL__DEBUG_LOG:
                     log.write(
                         "DEBUG => tripped internal debugger: name dict print\n")
+
+            elif bytecode.co_names[arg] == '__INTERNAL__UNSAFE_FUNCTION':
+                __INTERNAL__UNSAFE_FUNCTION = name_dict[arg]
+
+                if __INTERNAL__DEBUG_LOG:
+                    log.write(
+                        "DEBUG => tripped unsafe function support\n")
 
             if __INTERNAL__DEBUG_LOG:
                 log.write("DEBUG => set value of var %s to %s\n" %
@@ -424,6 +446,9 @@ def py2vm(code):
             math0 = const_stack.pop(0)
             const_stack.insert(0, getattr(math0, bytecode.co_names[arg]))
 
+        elif opcode_value == 'MAKE_FUNCTION':
+            codeload = const_stack[0]
+
         elif opcode_value == 'CALL_FUNCTION':
             try:
                 function = bytecode.co_names[const_stack[arg]]
@@ -434,19 +459,18 @@ def py2vm(code):
             for tick in xrange(0, arg):
                 arguments.insert(0, const_stack[tick])
 
-            if function == 'load.library':
-                const_stack.insert(0, CDLL(arguments[0]))
-                # print dir(const_stack[0])
+            if __INTERNAL__UNSAFE_FUNCTION:
+                obj = compile("%s(%s)" % (function, str(arguments).strip('[]')), '<string>', 'eval')
+                const_stack.insert(0, eval(obj))
 
-            elif function == '__INTERNAL__libc':
-                const_stack.insert(0, libc)
+                if __INTERNAL__DEBUG_LOG:
+                    log.write("DEBUG => UNSAFE FUNCTION CALL: %s(%s)\n" % (function, str(arguments).strip('[]')))
 
             else:
-                try:
-                    lookup = const_stack[1](const_stack[0])
-                    const_stack.insert(0, lookup)
-                except:
-                    print const_stack
+                const_stack, log = py2vm(const_stack[0], const_stack, log)
+
+                if __INTERNAL__DEBUG_LOG:
+                    log.write("DEBUG => CALLED FUNCTION %s\n" % (function))
 
         elif opcode_value == 'RETURN_VALUE':
 
@@ -458,16 +482,23 @@ def py2vm(code):
             log.write("unknown opcode: %s\n" % (opcode_value))
 
     i += 1
-    return log.getvalue()
+
+    if stack != False:
+        return stack, log
+    else:
+        return log.getvalue()
 
 code = """
 __INTERNAL__DEBUG_LOG=1
+__INTERNAL__UNSAFE_FUNCTION=0
 __INTERNAL__DEBUG_LOG_CONST=0
 
-print i
-print i
-print i
+def test():
+    return 'this second'
 
+print 'This comes first'
+print test()
+print 'and I am third'
 """
 
-print py2vm(code)
+print buildcode(code)
