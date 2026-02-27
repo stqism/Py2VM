@@ -35,8 +35,19 @@ _OPNAME_RAW = {
     137: 'STORE_DEREF', 140: 'CALL_FUNCTION_VAR', 141: 'CALL_FUNCTION_KW',
     142: 'CALL_FUNCTION_VAR_KW', 143: 'SETUP_WITH', 145: 'EXTENDED_ARG',
     146: 'SET_ADD', 147: 'MAP_ADD',
-    # Python 3.11 wordcode additions
-    151: 'RESUME', 166: 'PRECALL', 171: 'CALL',
+    # Python 3.11 wordcode additions / conflict overrides
+    2: 'PUSH_NULL',                    # was ROT_TWO
+    71: 'LOAD_BUILD_CLASS',            # was PRINT_ITEM
+    114: 'POP_JUMP_FORWARD_IF_FALSE',  # was POP_JUMP_IF_FALSE
+    115: 'POP_JUMP_FORWARD_IF_TRUE',   # was POP_JUMP_IF_TRUE
+    122: 'BINARY_OP',                  # was SETUP_FINALLY
+    129: 'POP_JUMP_FORWARD_IF_NONE',   # new
+    140: 'JUMP_BACKWARD',              # was CALL_FUNCTION_VAR
+    144: 'EXTENDED_ARG',               # was not in table (145 was in Python 2)
+    151: 'RESUME', 160: 'LOAD_METHOD',
+    164: 'DICT_MERGE', 165: 'DICT_UPDATE', 166: 'PRECALL', 171: 'CALL',
+    175: 'POP_JUMP_BACKWARD_IF_FALSE', 176: 'POP_JUMP_BACKWARD_IF_TRUE',
+    156: 'BUILD_CONST_KEY_MAP', 128: 'POP_JUMP_FORWARD_IF_NOT_NONE',
 }
 # Build OPNAME list without xrange — while loop with arithmetic only
 _i = 0
@@ -127,6 +138,7 @@ def bytecode_optimize(bytecode):
     py3_wordcode = (raw.__class__.__name__ == 'bytes')
     i = 0
     index_counter = 0
+    extended_arg = 0  # accumulator for EXTENDED_ARG prefix in wordcode mode
     while True:
         try:
             opcode_byte = code[i]
@@ -144,9 +156,25 @@ def bytecode_optimize(bytecode):
             if opcode_byte == 0:  # CACHE / padding — skip
                 continue
             opcode_value = OPNAME[opcode_byte]
+            if opcode_value == 'EXTENDED_ARG':
+                # Accumulate high bits for the next instruction's arg
+                extended_arg = (extended_arg | arg) << 8
+                continue
+            arg = extended_arg | arg
+            extended_arg = 0
+            # In wordcode, jump args are instruction counts (words), not bytes.
+            # Multiply by 2 to convert to byte offsets.
             if opcode_value in ('JUMP_FORWARD', 'FOR_ITER',
+                                'POP_JUMP_FORWARD_IF_FALSE',
+                                'POP_JUMP_FORWARD_IF_TRUE',
+                                'POP_JUMP_FORWARD_IF_NONE',
+                                'POP_JUMP_FORWARD_IF_NOT_NONE',
                                 'SETUP_LOOP', 'SETUP_EXCEPT', 'SETUP_FINALLY'):
-                arg = i + arg
+                arg = i + arg * 2
+            elif opcode_value in ('JUMP_BACKWARD',
+                                  'POP_JUMP_BACKWARD_IF_TRUE',
+                                  'POP_JUMP_BACKWARD_IF_FALSE'):
+                arg = i - arg * 2
         else:
             # Python 2 variable-width format
             if opcode_byte == 0:
@@ -184,6 +212,8 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
         const_stack = []
 
     fast_dict = fast_locals if fast_locals is not None else {}
+    # Detect Python 3 wordcode: co_code is bytes (int-indexable) vs str (Python 2)
+    py3_mode = (bytecode.co_code.__class__.__name__ == 'bytes')
 
     block_stack = []
 
@@ -272,7 +302,7 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
 
             if __INTERNAL__DEBUG_LOG:
                 log.write(
-                    'DEBUG => loaded %s on to stack\n' % (bytecode.co_consts[arg]))
+                    'DEBUG => loaded %s on to stack\n' % (bytecode.co_consts[arg],))
 
         elif opcode_value == 'LOAD_FAST':
             var_name = bytecode.co_varnames[arg]
@@ -300,6 +330,31 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
 
             if __INTERNAL__DEBUG_LOG:
                 log.write('DEBUG => loaded %s on to stack\n' % (_load_name_val,))
+
+        elif opcode_value == 'LOAD_GLOBAL':
+            # Python 3.11: arg = (name_index << 1) | push_null_flag
+            # Python 2: arg is the name index directly
+            _lg_idx = (arg >> 1) if py3_mode else arg
+            _lg_push_null = (arg & 1) if py3_mode else 0
+            _lg_name = bytecode.co_names[_lg_idx]
+            # Check local name_dict first (keyed by index in current co_names)
+            _lg_val = name_dict.get(_lg_idx)
+            if _lg_val is None:
+                try:
+                    _lg_val = __builtins__[_lg_name]
+                except TypeError:
+                    try:
+                        _lg_val = __builtins__.__dict__[_lg_name]
+                    except KeyError:
+                        _lg_val = None
+                except KeyError:
+                    _lg_val = None
+            if _lg_push_null:
+                const_stack.insert(0, None)
+            const_stack.insert(0, _lg_val)
+
+            if __INTERNAL__DEBUG_LOG:
+                log.write('DEBUG => LOAD_GLOBAL %s => %s\n' % (_lg_name, _lg_val))
 
         elif opcode_value == 'STORE_FAST':
             fast_dict[bytecode.co_varnames[arg]] = const_stack.pop(0)
@@ -490,6 +545,42 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
             if __INTERNAL__DEBUG_LOG:
                 log.write("DEBUG => %s OR %s\n" % (math1, math0))
 
+        elif opcode_value == 'BINARY_OP':
+            # Python 3.11: unified binary/inplace op; arg selects operation.
+            # Regular: 0=+  1=&  2=//  3=<<  5=*  6=%  7=|  8=**  9=>>  10=-  11=/  12=^
+            # Inplace: add 13 to regular arg (13=+=, 14=&=, ..., 23=-=, etc.)
+            _bo_arg = arg if arg < 13 else arg - 13
+            math0 = const_stack.pop(0)
+            math1 = const_stack.pop(0)
+            if _bo_arg == 0:    result = math1 + math0
+            elif _bo_arg == 1:  result = math1 & math0
+            elif _bo_arg == 2:  result = math1 // math0
+            elif _bo_arg == 3:  result = math1 << math0
+            elif _bo_arg == 5:  result = math1 * math0
+            elif _bo_arg == 6:  result = math1 % math0
+            elif _bo_arg == 7:  result = math1 | math0
+            elif _bo_arg == 8:  result = math1 ** math0
+            elif _bo_arg == 9:  result = math1 >> math0
+            elif _bo_arg == 10: result = math1 - math0
+            elif _bo_arg == 11: result = math1 / math0
+            elif _bo_arg == 12: result = math1 ^ math0
+            else:               result = None
+            const_stack.insert(0, result)
+
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => BINARY_OP[%d] %s op %s => %s\n" % (arg, math1, math0, result))
+
+        elif opcode_value == 'LOAD_BUILD_CLASS':
+            # Python 3.11: push __build_class__ builtin for class definitions
+            try:
+                _bld = __builtins__['__build_class__']
+            except TypeError:
+                _bld = __builtins__.__build_class__
+            const_stack.insert(0, _bld)
+
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => LOAD_BUILD_CLASS\n")
+
         elif opcode_value == 'COMPARE_OP':
             math0 = const_stack.pop(0)
             math1 = const_stack.pop(0)
@@ -567,6 +658,31 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
             if __INTERNAL__DEBUG_LOG:
                 log.write("DEBUG => jumped to %s\n" % (arg))
 
+        elif opcode_value == 'JUMP_BACKWARD':
+            # Python 3.11: backward loop jump (replaces JUMP_ABSOLUTE for loops)
+            i = offset_to_index[arg] - 1
+
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => jumped backward to %s\n" % (arg))
+
+        elif opcode_value == 'POP_JUMP_FORWARD_IF_FALSE':
+            # Python 3.11: forward conditional jump if false
+            tos = const_stack.pop(0)
+            if not tos:
+                i = offset_to_index[arg] - 1
+
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => POP_JUMP_FORWARD_IF_FALSE: tos=%s target=%s\n" % (tos, arg))
+
+        elif opcode_value == 'POP_JUMP_FORWARD_IF_TRUE':
+            # Python 3.11: forward conditional jump if true
+            tos = const_stack.pop(0)
+            if tos:
+                i = offset_to_index[arg] - 1
+
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => POP_JUMP_FORWARD_IF_TRUE: tos=%s target=%s\n" % (tos, arg))
+
         elif opcode_value == 'SETUP_LOOP':
             block_stack.append(('loop', arg))
 
@@ -607,6 +723,129 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
 
         elif opcode_value == 'PRINT_NEWLINE':
             log.write('\n')
+
+        elif opcode_value == 'LOAD_METHOD':
+            # Python 3.11: load a method; push (attr, obj) so CALL can pop self
+            _lm_obj = const_stack.pop(0)
+            _lm_attr = _lm_obj.__getattribute__(bytecode.co_names[arg])
+            const_stack.insert(0, _lm_attr)  # method at TOS
+            const_stack.insert(1, _lm_obj)   # self below method (CALL will pop it)
+
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => LOAD_METHOD %s\n" % bytecode.co_names[arg])
+
+        elif opcode_value == 'BUILD_MAP':
+            # arg=0: push empty dict (size hint).
+            # arg>0: pop 2*arg items (val0, key0, val1, key1, ...) and build dict.
+            if arg == 0:
+                const_stack.insert(0, {})
+            else:
+                _bm_dict = {}
+                _bm_count = arg
+                while _bm_count > 0:
+                    _bm_val = const_stack.pop(0)
+                    _bm_key = const_stack.pop(0)
+                    _bm_dict[_bm_key] = _bm_val
+                    _bm_count -= 1
+                const_stack.insert(0, _bm_dict)
+
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => BUILD_MAP %d\n" % arg)
+
+        elif opcode_value == 'MAP_ADD':
+            # MAP_ADD i: pop TOS (value) and TOS1 (key), add to dict at stack[i-1]
+            _ma_value = const_stack.pop(0)
+            _ma_key = const_stack.pop(0)
+            const_stack[arg - 1][_ma_key] = _ma_value
+
+        elif opcode_value == 'BUILD_CONST_KEY_MAP':
+            # Stack: TOS=keys_tuple, then N values (arg=N). Build dict.
+            _bck_keys = const_stack.pop(0)
+            _bck_vals = []
+            _bck_count = arg
+            while _bck_count > 0:
+                _bck_vals.insert(0, const_stack.pop(0))
+                _bck_count -= 1
+            _bck_result = {}
+            _bck_idx = 0
+            for _bck_k in _bck_keys:
+                _bck_result[_bck_k] = _bck_vals[_bck_idx]
+                _bck_idx += 1
+            const_stack.insert(0, _bck_result)
+
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => BUILD_CONST_KEY_MAP %d\n" % arg)
+
+        elif opcode_value in ('DICT_UPDATE', 'DICT_MERGE'):
+            # DICT_UPDATE/DICT_MERGE i: pop TOS, merge into dict at stack[i-1]
+            _du_other = const_stack.pop(0)
+            const_stack[arg - 1].update(_du_other)
+
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => %s\n" % opcode_value)
+
+        elif opcode_value == 'BUILD_LIST':
+            # arg items from stack (0 = empty list)
+            _bl_items = []
+            _bl_count = arg
+            while _bl_count > 0:
+                _bl_items.insert(0, const_stack.pop(0))
+                _bl_count -= 1
+            const_stack.insert(0, _bl_items)
+
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => BUILD_LIST %d\n" % arg)
+
+        elif opcode_value == 'BUILD_TUPLE':
+            # arg items from stack (0 = empty tuple)
+            _bt_items = []
+            _bt_count = arg
+            while _bt_count > 0:
+                _bt_items.insert(0, const_stack.pop(0))
+                _bt_count -= 1
+            const_stack.insert(0, tuple(_bt_items))
+
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => BUILD_TUPLE %d\n" % arg)
+
+        elif opcode_value == 'POP_JUMP_BACKWARD_IF_TRUE':
+            tos = const_stack.pop(0)
+            if tos:
+                i = offset_to_index[arg] - 1
+
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => POP_JUMP_BACKWARD_IF_TRUE: tos=%s target=%s\n" % (tos, arg))
+
+        elif opcode_value == 'POP_JUMP_BACKWARD_IF_FALSE':
+            tos = const_stack.pop(0)
+            if not tos:
+                i = offset_to_index[arg] - 1
+
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => POP_JUMP_BACKWARD_IF_FALSE: tos=%s target=%s\n" % (tos, arg))
+
+        elif opcode_value == 'POP_JUMP_FORWARD_IF_NONE':
+            tos = const_stack.pop(0)
+            if tos is None:
+                i = offset_to_index[arg] - 1
+
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => POP_JUMP_FORWARD_IF_NONE: tos=%s target=%s\n" % (tos, arg))
+
+        elif opcode_value == 'POP_JUMP_FORWARD_IF_NOT_NONE':
+            tos = const_stack.pop(0)
+            if tos is not None:
+                i = offset_to_index[arg] - 1
+
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => POP_JUMP_FORWARD_IF_NOT_NONE: tos=%s target=%s\n" % (tos, arg))
+
+        elif opcode_value in ('PUSH_EXC_INFO', 'POP_EXCEPT', 'CHECK_EXC_MATCH',
+                              'COPY', 'RERAISE'):
+            # Minimal exception-handling stubs — just discard the exception data
+            # so execution can continue on the happy path.
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => exc-handling stub: %s\n" % opcode_value)
 
         elif opcode_value == 'LOAD_ATTR':
             math0 = const_stack.pop(0)
@@ -720,7 +959,24 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
         return log.getvalue()
 
 
-code = """
+def run_script(path):
+    """Read a Python source file and execute it through the VM."""
+    _f = open(path)
+    _src = _f.read()
+    _f.close()
+    return buildcode(_src)
+
+
+_argv = __import__('sys').argv
+try:
+    _script = _argv[1]
+except IndexError:
+    _script = None
+
+if _script is not None:
+    print(run_script(_script))
+else:
+    code = """
 __INTERNAL__DEBUG_LOG=1
 __INTERNAL__DEBUG_LOG_CONST=0
 
@@ -732,5 +988,4 @@ print('This comes first')
 print(test('second'))
 print('and I am third')
 """
-
-print(buildcode(code))
+    print(buildcode(code))
