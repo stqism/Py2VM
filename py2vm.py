@@ -198,7 +198,7 @@ def buildcode(code):
     return py2vm(compile(code, '<none>', 'exec'))
 
 
-def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
+def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None, globals_frame=None):
 
     if rec_log != False:
         log = rec_log
@@ -221,6 +221,24 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
     __INTERNAL__DEBUG_LOG_CONST = 0
     __INTERNAL__DEBUG_LOG_VAR = 0
     name_dict = {}
+    globals_frame = globals_frame if globals_frame is not None else {'__builtins__': __builtins__}
+
+    # Factory: create a real callable that runs a code object through the VM.
+    # Using a factory rather than a bare closure ensures each call captures its
+    # own _co/_gf values rather than sharing a reference to the loop variable.
+    def _mf_make(_co, _gf):
+        def _mf_callable(*_args):
+            _fl = {}
+            _idx = 0
+            for _val in _args:
+                try:
+                    _fl[_co.co_varnames[_idx]] = _val
+                except IndexError:
+                    pass
+                _idx += 1
+            _rs, _ignored = py2vm(_co, [], False, fast_locals=_fl, globals_frame=_gf)
+            return _rs[0] if _rs else None
+        return _mf_callable
 
     # I was inspired by str8C
     i = -1
@@ -337,8 +355,11 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
             _lg_idx = (arg >> 1) if py3_mode else arg
             _lg_push_null = (arg & 1) if py3_mode else 0
             _lg_name = bytecode.co_names[_lg_idx]
-            # Check local name_dict first (keyed by index in current co_names)
+            # Check local name_dict first (keyed by index in current co_names),
+            # then the shared string-keyed globals_frame, then builtins.
             _lg_val = name_dict.get(_lg_idx)
+            if _lg_val is None:
+                _lg_val = globals_frame.get(_lg_name)
             if _lg_val is None:
                 try:
                     _lg_val = __builtins__[_lg_name]
@@ -365,6 +386,7 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
 
         elif opcode_value == 'STORE_NAME':
             name_dict[arg] = const_stack.pop(0)
+            globals_frame[bytecode.co_names[arg]] = name_dict[arg]
             if bytecode.co_names[arg] == '__INTERNAL__DEBUG_LOG':
                 __INTERNAL__DEBUG_LOG = name_dict[arg]
 
@@ -395,6 +417,12 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
 
             if __INTERNAL__DEBUG_LOG:
                 log.write("DEBUG => deleted name dict entry %s\n" % (arg))
+
+        elif opcode_value == 'STORE_GLOBAL':
+            globals_frame[bytecode.co_names[arg]] = const_stack.pop(0)
+
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => STORE_GLOBAL %s\n" % bytecode.co_names[arg])
 
         elif opcode_value == 'UNARY_POSITIVE':
             const_stack.insert(0, +(const_stack[0]))
@@ -852,7 +880,14 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
             const_stack.insert(0, math0.__getattribute__(bytecode.co_names[arg]))
 
         elif opcode_value == 'MAKE_FUNCTION':
-            pass  # code object stays on TOS; STORE_NAME will consume it
+            # Consume any extras that were pushed below the code object,
+            # ordered high-bit to low-bit (closure, annotations, kw defaults, defaults).
+            if arg & 0x08: const_stack.pop(0)   # closure (free-var cell tuple)
+            if arg & 0x04: const_stack.pop(0)   # annotations dict
+            if arg & 0x02: const_stack.pop(0)   # kwonly defaults dict
+            if arg & 0x01: const_stack.pop(0)   # positional defaults tuple
+            _mf_code = const_stack.pop(0)
+            const_stack.insert(0, _mf_make(_mf_code, globals_frame))
 
         elif opcode_value == 'CALL_FUNCTION':
             argc = arg & 0xff
@@ -888,13 +923,24 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
                     except IndexError:
                         pass
                     idx += 1
-                result_stack, log = py2vm(func, [], log, fast_locals=fl)
+                result_stack, log = py2vm(func, [], log, fast_locals=fl, globals_frame=globals_frame)
                 const_stack.insert(0, result_stack[0] if result_stack else None)
 
                 if __INTERNAL__DEBUG_LOG:
                     log.write("DEBUG => called function %s(%s)\n" % (func.co_name, args_list))
 
             except AttributeError:
+                try:
+                    if func.__name__ == '__build_class__' and args_list:
+                        _cb = args_list[0]
+                        try:
+                            _cb_code = _cb.__closure__[0].cell_contents
+                            _cb_gf = _cb.__closure__[1].cell_contents
+                            args_list[0] = py2vm.__class__(_cb_code, _cb_gf)
+                        except Exception:
+                            pass
+                except AttributeError:
+                    pass
                 try:
                     result = func(*args_list, **kwargs)
                     const_stack.insert(0, result)
@@ -928,13 +974,27 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
                     except IndexError:
                         pass
                     idx += 1
-                result_stack, log = py2vm(func, [], log, fast_locals=fl)
+                result_stack, log = py2vm(func, [], log, fast_locals=fl, globals_frame=globals_frame)
                 const_stack.insert(0, result_stack[0] if result_stack else None)
 
                 if __INTERNAL__DEBUG_LOG:
                     log.write("DEBUG => CALL code object %s(%s)\n" % (func.co_name, args_list))
 
             except AttributeError:
+                # Before calling natively, if this is __build_class__ unwrap any
+                # _mf_callable wrapper in the first argument so the class body
+                # runs as a real FunctionType (needed for proper class namespace).
+                try:
+                    if func.__name__ == '__build_class__' and args_list:
+                        _cb = args_list[0]
+                        try:
+                            _cb_code = _cb.__closure__[0].cell_contents
+                            _cb_gf = _cb.__closure__[1].cell_contents
+                            args_list[0] = py2vm.__class__(_cb_code, _cb_gf)
+                        except Exception:
+                            pass
+                except AttributeError:
+                    pass
                 try:
                     result = func(*args_list)
                     const_stack.insert(0, result)
@@ -959,12 +1019,22 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
         return log.getvalue()
 
 
+_VM_EXEC_DEPTH = 0
+
+
 def run_script(path):
     """Read a Python source file and execute it through the VM."""
-    _f = open(path)
-    _src = _f.read()
-    _f.close()
-    return buildcode(_src)
+    global _VM_EXEC_DEPTH
+    if _VM_EXEC_DEPTH >= 1:
+        return ''   # prevent infinite meta-circular recursion
+    _VM_EXEC_DEPTH += 1
+    try:
+        _f = open(path)
+        _src = _f.read()
+        _f.close()
+        return buildcode(_src)
+    finally:
+        _VM_EXEC_DEPTH -= 1
 
 
 _argv = __import__('sys').argv
