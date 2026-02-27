@@ -36,7 +36,13 @@ _OPNAME_RAW = {
     142: 'CALL_FUNCTION_VAR_KW', 143: 'SETUP_WITH', 145: 'EXTENDED_ARG',
     146: 'SET_ADD', 147: 'MAP_ADD',
 }
-OPNAME = [_OPNAME_RAW.get(i, '<%d>' % i) for i in xrange(256)]
+# Build OPNAME list without xrange — while loop with arithmetic only
+_i = 0
+OPNAME = []
+while _i < 256:
+    OPNAME.append(_OPNAME_RAW.get(_i, '<%d>' % _i))
+    _i += 1
+del _i
 
 # Python 2.7 comparison operator table (dis.cmp_op equivalent)
 CMP_OP = ('<', '<=', '==', '!=', '>', '>=', 'in', 'not in', 'is', 'is not',
@@ -103,17 +109,30 @@ def hasarg(opcode):
 def bytecode_optimize(bytecode):
     bytecode_list = []
     offset_to_index = {}
-    code = bytecode.co_code
+    raw = bytecode.co_code
+    # Normalize co_code to a list of ints once.  In Python 3, bytes[i] already
+    # yields an int.  In Python 2, co_code is a str and each element is a char
+    # that needs ord() — there is no dunder equivalent for that conversion.
+    code = []
+    for b in raw:
+        if b.__class__.__name__ == 'int':
+            code.append(b)
+        else:
+            code.append(ord(b))  # Python 2: char -> int, no dunder alternative
     i = 0
-    while i < len(code):
+    index_counter = 0
+    while True:
+        try:
+            opcode_byte = code[i]
+        except IndexError:
+            break
         offset = i
-        opcode_byte = ord(code[i])
         i += 1
         if opcode_byte == 0:
             continue
         opcode_value = OPNAME[opcode_byte]
         if hasarg(opcode_value):
-            arg = ord(code[i]) | (ord(code[i + 1]) << 8)
+            arg = code[i] | (code[i + 1] << 8)
             i += 2
             # Convert relative jump offsets to absolute byte offsets
             if opcode_value in ('JUMP_FORWARD', 'FOR_ITER',
@@ -121,8 +140,9 @@ def bytecode_optimize(bytecode):
                 arg = i + arg
         else:
             arg = 0
-        offset_to_index[offset] = len(bytecode_list)
+        offset_to_index[offset] = index_counter
         bytecode_list.append([opcode_value, arg])
+        index_counter += 1
     return bytecode_list, offset_to_index
 
 
@@ -145,23 +165,22 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
 
     fast_dict = fast_locals if fast_locals is not None else {}
 
-    jump = 0
-
     block_stack = []
 
     __INTERNAL__DEBUG_LOG = 1
     __INTERNAL__DEBUG_LOG_CONST = 0
     __INTERNAL__DEBUG_LOG_VAR = 0
-    __INTERNAL__UNSAFE_FUNCTION = 0
     name_dict = {}
 
     # I was inspired by str8C
     i = -1
     opcode_array, offset_to_index = bytecode_optimize(bytecode)
-    while i < len(opcode_array):
+    while True:
         i += 1
-
-        opcode_pack = opcode_array[i]
+        try:
+            opcode_pack = opcode_array[i]
+        except IndexError:
+            break
         opcode_value = opcode_pack[0]
         arg = opcode_pack[1]
 
@@ -169,10 +188,10 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
         # log.write(opcode_value)
 
         if __INTERNAL__DEBUG_LOG_CONST:
-            log.write(str(const_stack) + '\n')
+            log.write(const_stack.__str__() + '\n')
 
         if __INTERNAL__DEBUG_LOG_VAR:
-            log.write(str(name_dict) + '\n')
+            log.write(name_dict.__str__() + '\n')
 
         if opcode_value == 'NOP':
             if __INTERNAL__DEBUG_LOG:
@@ -264,13 +283,6 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
                     log.write(
                         "DEBUG => tripped internal debugger: name dict print\n")
 
-            elif bytecode.co_names[arg] == '__INTERNAL__UNSAFE_FUNCTION':
-                __INTERNAL__UNSAFE_FUNCTION = name_dict[arg]
-
-                if __INTERNAL__DEBUG_LOG:
-                    log.write(
-                        "DEBUG => tripped unsafe function support\n")
-
             if __INTERNAL__DEBUG_LOG:
                 log.write("DEBUG => set value of var %s to %s\n" %
                           (bytecode.co_names[arg], name_dict[arg]))
@@ -300,7 +312,7 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
                 log.write("DEBUG => set top of stack to not tos\n")
 
         elif opcode_value == 'UNARY_CONVERT':
-            const_stack.insert(0, repr(const_stack[0]))
+            const_stack.insert(0, const_stack[0].__repr__())
 
             if __INTERNAL__DEBUG_LOG:
                 log.write("DEBUG => added repr(tos) to top of stack\n")
@@ -312,7 +324,7 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
                 log.write("DEBUG => added ~tos to top of stack\n")
 
         elif opcode_value == 'GET_ITER':
-            const_stack[0] = iter(const_stack[0])
+            const_stack[0] = const_stack[0].__iter__()
 
             if __INTERNAL__DEBUG_LOG:
                 log.write("DEBUG => replaced tos with iter(tos)\n")
@@ -391,40 +403,40 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
                 log.write("DEBUG => set tos to %s[%s]\n" % (math1, math0))
 
         elif opcode_value == 'BINARY_LSHIFT':
-            math0 = int(const_stack.pop(0))
-            math1 = int(const_stack.pop(0))
+            math0 = const_stack.pop(0).__int__()
+            math1 = const_stack.pop(0).__int__()
             const_stack.insert(0, math1 << math0)
 
             if __INTERNAL__DEBUG_LOG:
                 log.write("DEBUG => shifted %s left %s\n" % (math1, math0))
 
         elif opcode_value == 'BINARY_RSHIFT':
-            math0 = int(const_stack.pop(0))
-            math1 = int(const_stack.pop(0))
+            math0 = const_stack.pop(0).__int__()
+            math1 = const_stack.pop(0).__int__()
             const_stack.insert(0, math1 >> math0)
 
             if __INTERNAL__DEBUG_LOG:
                 log.write("DEBUG => shifted %s right %s\n" % (math1, math0))
 
         elif opcode_value == 'BINARY_AND':
-            math0 = int(const_stack.pop(0))
-            math1 = int(const_stack.pop(0))
+            math0 = const_stack.pop(0).__int__()
+            math1 = const_stack.pop(0).__int__()
             const_stack.insert(0, math1 & math0)
 
             if __INTERNAL__DEBUG_LOG:
                 log.write("DEBUG => %s AND %s\n" % (math1, math0))
 
         elif opcode_value == 'BINARY_XOR':
-            math0 = int(const_stack.pop(0))
-            math1 = int(const_stack.pop(0))
+            math0 = const_stack.pop(0).__int__()
+            math1 = const_stack.pop(0).__int__()
             const_stack.insert(0, math1 ^ math0)
 
             if __INTERNAL__DEBUG_LOG:
                 log.write("DEBUG => %s XOR %s\n" % (math1, math0))
 
         elif opcode_value == 'BINARY_OR':
-            math0 = int(const_stack.pop(0))
-            math1 = int(const_stack.pop(0))
+            math0 = const_stack.pop(0).__int__()
+            math1 = const_stack.pop(0).__int__()
             const_stack.insert(0, math1 | math0)
 
             if __INTERNAL__DEBUG_LOG:
@@ -530,7 +542,7 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
 
         elif opcode_value == 'FOR_ITER':
             try:
-                val = next(const_stack[0])
+                val = const_stack[0].next()  # Python 2 iterator protocol
                 const_stack.insert(0, val)
             except StopIteration:
                 const_stack.pop(0)
@@ -540,14 +552,14 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
                 log.write("DEBUG => FOR_ITER\n")
 
         elif opcode_value == 'PRINT_ITEM':
-            log.write(str(const_stack.pop(0)))
+            log.write(const_stack.pop(0).__str__())
 
         elif opcode_value == 'PRINT_NEWLINE':
             log.write('\n')
 
         elif opcode_value == 'LOAD_ATTR':
             math0 = const_stack.pop(0)
-            const_stack.insert(0, getattr(math0, bytecode.co_names[arg]))
+            const_stack.insert(0, math0.__getattribute__(bytecode.co_names[arg]))
 
         elif opcode_value == 'MAKE_FUNCTION':
             pass  # code object stays on TOS; STORE_NAME will consume it
@@ -556,39 +568,43 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
             argc = arg & 0xff
             kwargc = (arg >> 8) & 0xff
 
+            # Collect keyword arguments — while countdown avoids xrange/range
             kwargs = {}
-            for _ in xrange(kwargc):
+            count = kwargc
+            while count > 0:
                 val = const_stack.pop(0)
                 key = const_stack.pop(0)
                 kwargs[key] = val
+                count -= 1
 
+            # Collect positional arguments in call order
             args_list = []
-            for _ in xrange(argc):
+            count = argc
+            while count > 0:
                 args_list.insert(0, const_stack.pop(0))
+                count -= 1
 
             func = const_stack.pop(0)
 
-            if __INTERNAL__UNSAFE_FUNCTION:
-                func_name = func if isinstance(func, str) else getattr(func, '__name__', repr(func))
-                obj = compile("%s(%s)" % (func_name, str(args_list).strip('[]')), '<string>', 'eval')
-                result = eval(obj)
-                const_stack.insert(0, result)
-
-                if __INTERNAL__DEBUG_LOG:
-                    log.write("DEBUG => UNSAFE FUNCTION CALL: %s(%s) => %s\n" % (func_name, args_list, result))
-
-            elif hasattr(func, 'co_code'):
+            # Dispatch: probe for co_code to detect VM-interpreted code objects;
+            # fall back to native callable otherwise.  try/except replaces hasattr.
+            try:
+                func.co_code  # probe — only code objects have this attribute
                 fl = {}
-                for idx, val in enumerate(args_list):
-                    if idx < len(func.co_varnames):
+                idx = 0
+                for val in args_list:
+                    try:
                         fl[func.co_varnames[idx]] = val
+                    except IndexError:
+                        pass
+                    idx += 1
                 result_stack, log = py2vm(func, [], log, fast_locals=fl)
                 const_stack.insert(0, result_stack[0] if result_stack else None)
 
                 if __INTERNAL__DEBUG_LOG:
                     log.write("DEBUG => called function %s(%s)\n" % (func.co_name, args_list))
 
-            else:
+            except AttributeError:
                 try:
                     result = func(*args_list, **kwargs)
                     const_stack.insert(0, result)
@@ -615,7 +631,6 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
 
 code = """
 __INTERNAL__DEBUG_LOG=1
-__INTERNAL__UNSAFE_FUNCTION=0
 __INTERNAL__DEBUG_LOG_CONST=0
 
 def test(order):
