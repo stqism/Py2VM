@@ -1,6 +1,6 @@
 # Python 2.7 opcode table (dis.opname equivalent — hardcoded to avoid dis import)
 _OPNAME_RAW = {
-    0: 'STOP_CODE', 1: 'POP_TOP', 2: 'ROT_TWO', 3: 'ROT_THREE', 4: 'DUP_TOP',
+    0: 'STOP_CODE', 1: 'POP_TOP', 2: 'PUSH_NULL', 3: 'ROT_THREE', 4: 'DUP_TOP',
     5: 'ROT_FOUR', 9: 'NOP', 10: 'UNARY_POSITIVE', 11: 'UNARY_NEGATIVE',
     12: 'UNARY_NOT', 13: 'UNARY_CONVERT', 15: 'UNARY_INVERT', 19: 'BINARY_POWER',
     20: 'BINARY_MULTIPLY', 21: 'BINARY_DIVIDE', 22: 'BINARY_MODULO',
@@ -35,6 +35,8 @@ _OPNAME_RAW = {
     137: 'STORE_DEREF', 140: 'CALL_FUNCTION_VAR', 141: 'CALL_FUNCTION_KW',
     142: 'CALL_FUNCTION_VAR_KW', 143: 'SETUP_WITH', 145: 'EXTENDED_ARG',
     146: 'SET_ADD', 147: 'MAP_ADD',
+    # Python 3.11 wordcode additions
+    151: 'RESUME', 166: 'PRECALL', 171: 'CALL',
 }
 # Build OPNAME list without xrange — while loop with arithmetic only
 _i = 0
@@ -119,6 +121,10 @@ def bytecode_optimize(bytecode):
             code.append(b)
         else:
             code.append(ord(b))  # Python 2: char -> int, no dunder alternative
+    # Python 3 uses WORDCODE: every instruction is exactly 2 bytes (opcode, arg).
+    # Python 2 uses variable-width: 1 byte for no-arg, 3 bytes for arg instructions.
+    # Detect format by checking if co_code is a bytes object (Python 3) or str (Python 2).
+    py3_wordcode = (raw.__class__.__name__ == 'bytes')
     i = 0
     index_counter = 0
     while True:
@@ -128,18 +134,32 @@ def bytecode_optimize(bytecode):
             break
         offset = i
         i += 1
-        if opcode_byte == 0:
-            continue
-        opcode_value = OPNAME[opcode_byte]
-        if hasarg(opcode_value):
-            arg = code[i] | (code[i + 1] << 8)
-            i += 2
-            # Convert relative jump offsets to absolute byte offsets
+        if py3_wordcode:
+            # Python 3 WORDCODE: always read one arg byte
+            try:
+                arg = code[i]
+            except IndexError:
+                arg = 0
+            i += 1
+            if opcode_byte == 0:  # CACHE / padding — skip
+                continue
+            opcode_value = OPNAME[opcode_byte]
             if opcode_value in ('JUMP_FORWARD', 'FOR_ITER',
                                 'SETUP_LOOP', 'SETUP_EXCEPT', 'SETUP_FINALLY'):
                 arg = i + arg
         else:
-            arg = 0
+            # Python 2 variable-width format
+            if opcode_byte == 0:
+                continue
+            opcode_value = OPNAME[opcode_byte]
+            if hasarg(opcode_value):
+                arg = code[i] | (code[i + 1] << 8)
+                i += 2
+                if opcode_value in ('JUMP_FORWARD', 'FOR_ITER',
+                                    'SETUP_LOOP', 'SETUP_EXCEPT', 'SETUP_FINALLY'):
+                    arg = i + arg
+            else:
+                arg = 0
         offset_to_index[offset] = index_counter
         bytecode_list.append([opcode_value, arg])
         index_counter += 1
@@ -197,6 +217,22 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
             if __INTERNAL__DEBUG_LOG:
                 log.write('DEBUG => internal placeholder\n')
 
+        elif opcode_value == 'RESUME':
+            # Python 3.11: entry point marker — treated as NOP
+            if __INTERNAL__DEBUG_LOG:
+                log.write('DEBUG => RESUME (Python 3.11 entry marker)\n')
+
+        elif opcode_value == 'PUSH_NULL':
+            # Python 3.11: push NULL sentinel before a non-method callable
+            const_stack.insert(0, None)
+            if __INTERNAL__DEBUG_LOG:
+                log.write('DEBUG => PUSH_NULL\n')
+
+        elif opcode_value == 'PRECALL':
+            # Python 3.11: pre-call check — treated as NOP
+            if __INTERNAL__DEBUG_LOG:
+                log.write('DEBUG => PRECALL\n')
+
         elif opcode_value == 'POP_TOP':
             if const_stack:
                 del const_stack[0]
@@ -247,11 +283,23 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
                     'DEBUG => loaded %s (%s) on to stack\n' % (var_name, fast_dict.get(var_name)))
 
         elif opcode_value == 'LOAD_NAME':
-            const_stack.insert(0, name_dict.get(arg))
+            _load_name_val = name_dict.get(arg)
+            if _load_name_val is None:
+                # Fall back to Python builtins for names like 'print', 'range', etc.
+                _name_str = bytecode.co_names[arg]
+                try:
+                    _load_name_val = __builtins__[_name_str]
+                except TypeError:
+                    try:
+                        _load_name_val = __builtins__.__dict__[_name_str]
+                    except KeyError:
+                        _load_name_val = None
+                except KeyError:
+                    _load_name_val = None
+            const_stack.insert(0, _load_name_val)
 
             if __INTERNAL__DEBUG_LOG:
-                log.write('DEBUG => loaded %s on to stack\n' %
-                          (name_dict.get(arg)))
+                log.write('DEBUG => loaded %s on to stack\n' % (_load_name_val,))
 
         elif opcode_value == 'STORE_FAST':
             fast_dict[bytecode.co_varnames[arg]] = const_stack.pop(0)
@@ -542,7 +590,10 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
 
         elif opcode_value == 'FOR_ITER':
             try:
-                val = const_stack[0].next()  # Python 2 iterator protocol
+                try:
+                    val = const_stack[0].__next__()  # Python 3
+                except AttributeError:
+                    val = const_stack[0].next()  # Python 2
                 const_stack.insert(0, val)
             except StopIteration:
                 const_stack.pop(0)
@@ -612,6 +663,46 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None):
                     log.write("ERROR => could not call %s: %s\n" % (func, e))
                     const_stack.insert(0, None)
 
+        elif opcode_value == 'CALL':
+            # Python 3.11 CALL opcode: like CALL_FUNCTION but stack also has a
+            # NULL sentinel below the callable (pushed by PUSH_NULL).
+            argc = arg  # no kwargs encoding in Python 3.11 CALL
+
+            args_list = []
+            count = argc
+            while count > 0:
+                args_list.insert(0, const_stack.pop(0))
+                count -= 1
+
+            func = const_stack.pop(0)
+            # Pop the NULL sentinel pushed by PUSH_NULL (or self for method calls)
+            if const_stack:
+                const_stack.pop(0)
+
+            try:
+                func.co_code  # probe for VM code object
+                fl = {}
+                idx = 0
+                for val in args_list:
+                    try:
+                        fl[func.co_varnames[idx]] = val
+                    except IndexError:
+                        pass
+                    idx += 1
+                result_stack, log = py2vm(func, [], log, fast_locals=fl)
+                const_stack.insert(0, result_stack[0] if result_stack else None)
+
+                if __INTERNAL__DEBUG_LOG:
+                    log.write("DEBUG => CALL code object %s(%s)\n" % (func.co_name, args_list))
+
+            except AttributeError:
+                try:
+                    result = func(*args_list)
+                    const_stack.insert(0, result)
+                except Exception as e:
+                    log.write("ERROR => could not CALL %s: %s\n" % (func, e))
+                    const_stack.insert(0, None)
+
         elif opcode_value == 'RETURN_VALUE':
 
             if __INTERNAL__DEBUG_LOG:
@@ -637,9 +728,9 @@ def test(order):
     __INTERNAL__DEBUG_LOG=1
     return order
 
-print 'This comes first'
-print test('second')
-print 'and I am third'
+print('This comes first')
+print(test('second'))
+print('and I am third')
 """
 
-print buildcode(code)
+print(buildcode(code))
