@@ -1,85 +1,29 @@
-# Python 2.7 opcode table (dis.opname equivalent — hardcoded to avoid dis import)
-_OPNAME_RAW = {
-    0: 'STOP_CODE', 1: 'POP_TOP', 2: 'PUSH_NULL', 3: 'ROT_THREE', 4: 'DUP_TOP',
-    5: 'ROT_FOUR', 9: 'NOP', 10: 'UNARY_POSITIVE', 11: 'UNARY_NEGATIVE',
-    12: 'UNARY_NOT', 13: 'UNARY_CONVERT', 15: 'UNARY_INVERT', 19: 'BINARY_POWER',
-    20: 'BINARY_MULTIPLY', 21: 'BINARY_DIVIDE', 22: 'BINARY_MODULO',
-    23: 'BINARY_ADD', 24: 'BINARY_SUBTRACT', 25: 'BINARY_SUBSCR',
-    26: 'BINARY_FLOOR_DIVIDE', 27: 'BINARY_TRUE_DIVIDE',
-    28: 'INPLACE_FLOOR_DIVIDE', 29: 'INPLACE_TRUE_DIVIDE',
-    30: 'SLICE+0', 31: 'SLICE+1', 32: 'SLICE+2', 33: 'SLICE+3',
-    40: 'STORE_SLICE+0', 41: 'STORE_SLICE+1', 42: 'STORE_SLICE+2', 43: 'STORE_SLICE+3',
-    50: 'DELETE_SLICE+0', 51: 'DELETE_SLICE+1', 52: 'DELETE_SLICE+2', 53: 'DELETE_SLICE+3',
-    54: 'STORE_MAP', 55: 'INPLACE_ADD', 56: 'INPLACE_SUBTRACT',
-    57: 'INPLACE_MULTIPLY', 58: 'INPLACE_DIVIDE', 59: 'INPLACE_MODULO',
-    60: 'STORE_SUBSCR', 61: 'DELETE_SUBSCR', 62: 'BINARY_LSHIFT',
-    63: 'BINARY_RSHIFT', 64: 'BINARY_AND', 65: 'BINARY_XOR', 66: 'BINARY_OR',
-    67: 'INPLACE_POWER', 68: 'GET_ITER', 70: 'PRINT_EXPR', 71: 'PRINT_ITEM',
-    72: 'PRINT_NEWLINE', 73: 'PRINT_ITEM_TO', 74: 'PRINT_NEWLINE_TO',
-    75: 'INPLACE_LSHIFT', 76: 'INPLACE_RSHIFT', 77: 'INPLACE_AND',
-    78: 'INPLACE_XOR', 79: 'INPLACE_OR', 80: 'BREAK_LOOP', 81: 'WITH_CLEANUP',
-    82: 'LOAD_LOCALS', 83: 'RETURN_VALUE', 84: 'IMPORT_STAR', 85: 'EXEC_STMT',
-    86: 'YIELD_VALUE', 87: 'POP_BLOCK', 88: 'END_FINALLY', 89: 'BUILD_CLASS',
-    90: 'STORE_NAME', 91: 'DELETE_NAME', 92: 'UNPACK_SEQUENCE', 93: 'FOR_ITER',
-    94: 'LIST_APPEND', 95: 'STORE_ATTR', 96: 'DELETE_ATTR', 97: 'STORE_GLOBAL',
-    98: 'DELETE_GLOBAL', 99: 'DUP_TOPX', 100: 'LOAD_CONST', 101: 'LOAD_NAME',
-    102: 'BUILD_TUPLE', 103: 'BUILD_LIST', 104: 'BUILD_SET', 105: 'BUILD_MAP',
-    106: 'LOAD_ATTR', 107: 'COMPARE_OP', 108: 'IMPORT_NAME', 109: 'IMPORT_FROM',
-    110: 'JUMP_FORWARD', 111: 'JUMP_IF_FALSE_OR_POP', 112: 'JUMP_IF_TRUE_OR_POP',
-    113: 'JUMP_ABSOLUTE', 114: 'POP_JUMP_IF_FALSE', 115: 'POP_JUMP_IF_TRUE',
-    116: 'LOAD_GLOBAL', 119: 'CONTINUE_LOOP', 120: 'SETUP_LOOP',
-    121: 'SETUP_EXCEPT', 122: 'SETUP_FINALLY', 124: 'LOAD_FAST',
-    125: 'STORE_FAST', 126: 'DELETE_FAST', 130: 'RAISE_VARARGS',
-    131: 'CALL_FUNCTION', 132: 'MAKE_FUNCTION', 133: 'BUILD_SLICE',
-    134: 'MAKE_CLOSURE', 135: 'LOAD_CLOSURE', 136: 'LOAD_DEREF',
-    137: 'STORE_DEREF', 140: 'CALL_FUNCTION_VAR', 141: 'CALL_FUNCTION_KW',
-    142: 'CALL_FUNCTION_VAR_KW', 143: 'SETUP_WITH', 145: 'EXTENDED_ARG',
-    146: 'SET_ADD', 147: 'MAP_ADD',
-    # Python 3.11 wordcode additions / conflict overrides
-    2: 'PUSH_NULL',                    # was ROT_TWO
-    35: 'PUSH_EXC_INFO',               # new in 3.11
-    36: 'CHECK_EXC_MATCH',             # new in 3.11
-    71: 'LOAD_BUILD_CLASS',            # was PRINT_ITEM
-    89: 'POP_EXCEPT',                  # was BUILD_CLASS in Python 2
-    99: 'SWAP',                        # was DUP_TOPX in Python 2
-    114: 'POP_JUMP_FORWARD_IF_FALSE',  # was POP_JUMP_IF_FALSE
-    115: 'POP_JUMP_FORWARD_IF_TRUE',   # was POP_JUMP_IF_TRUE
-    117: 'IS_OP',                      # new in 3.9+
-    118: 'CONTAINS_OP',               # new in 3.9+
-    119: 'RERAISE',                    # was CONTINUE_LOOP in Python 2
-    120: 'COPY',                       # was SETUP_LOOP in Python 2
-    122: 'BINARY_OP',                  # was SETUP_FINALLY
-    128: 'POP_JUMP_FORWARD_IF_NOT_NONE',  # new
-    129: 'POP_JUMP_FORWARD_IF_NONE',   # new
-    135: 'MAKE_CELL',                  # was LOAD_CLOSURE in Python 2; Python 3.11 shifted by 1
-    136: 'LOAD_CLOSURE',               # was LOAD_DEREF in Python 2
-    137: 'LOAD_DEREF',                 # was STORE_DEREF in Python 2
-    138: 'STORE_DEREF',                # new slot in Python 3.11
-    140: 'JUMP_BACKWARD',              # was CALL_FUNCTION_VAR
-    142: 'CALL_FUNCTION_EX',           # was CALL_FUNCTION_VAR_KW in Python 2
-    144: 'EXTENDED_ARG',               # was not in table (145 was in Python 2)
-    149: 'COPY_FREE_VARS',             # new in 3.11
-    151: 'RESUME', 155: 'FORMAT_VALUE', 156: 'BUILD_CONST_KEY_MAP',
-    157: 'BUILD_STRING', 160: 'LOAD_METHOD',
-    164: 'DICT_MERGE', 165: 'DICT_UPDATE', 166: 'PRECALL', 171: 'CALL',
-    172: 'KW_NAMES',
-    175: 'POP_JUMP_BACKWARD_IF_FALSE', 176: 'POP_JUMP_BACKWARD_IF_TRUE',
-}
-# Build OPNAME list without xrange — while loop with arithmetic only
-_i = 0
-OPNAME = []
-while _i < 256:
-    OPNAME.append(_OPNAME_RAW.get(_i, '<%d>' % _i))
-    _i += 1
-del _i
+# Py2VM — Python 3.11 bytecode interpreter with explicit frame stack.
+# Targets CPython 3.11 unspecialized bytecode (Tiers 1-5).
+# Generator/async opcodes (Tier 6) are explicitly rejected.
 
-# Python 2.7 comparison operator table (dis.cmp_op equivalent)
-CMP_OP = ('<', '<=', '==', '!=', '>', '>=', 'in', 'not in', 'is', 'is not',
-          'exception match', 'BAD')
+import dis as _dis_mod
+import types as _types_mod
+import weakref as _weakref_mod
+
+# ---------------------------------------------------------------------------
+# Sentinels
+# ---------------------------------------------------------------------------
+_NULL = object()   # PUSH_NULL sentinel — distinct from Python None
+_UNSET = object()  # Uninitialized fast-local slot
 
 
-class _StringIO(object):
-    """Minimal string buffer replacing the StringIO module."""
+# ---------------------------------------------------------------------------
+# Comparison operator table (dis.cmp_op equivalent for COMPARE_OP)
+# ---------------------------------------------------------------------------
+CMP_OP = ('<', '<=', '==', '!=', '>', '>=', 'in', 'not in', 'is',
+          'is not', 'exception match', 'BAD')
+
+
+# ---------------------------------------------------------------------------
+# Minimal string buffer (avoids importing io/StringIO)
+# ---------------------------------------------------------------------------
+class _StringIO:
     def __init__(self):
         self._buf = []
 
@@ -90,1295 +34,1126 @@ class _StringIO(object):
         return ''.join(self._buf)
 
 
-def hasarg(opcode):
-    if opcode.startswith('STOP'):
-        return 0
-    elif opcode.startswith('NOP'):
-        return 0
-    elif opcode == 'POP_TOP':
-        return 0
-    elif opcode == 'POP_BLOCK':
-        return 0
-    elif opcode.startswith('ROT'):
-        return 0
-    elif opcode.startswith('DUP'):
-        return 0
-    elif opcode.startswith('UNARY'):
-        return 0
-    elif opcode.startswith('GET'):
-        return 0
-    elif opcode.startswith('BINARY'):
-        return 0
-    elif opcode.startswith('INPLACE'):
-        return 0
-    elif opcode.startswith('PRINT'):
-        return 0
-    elif opcode.startswith('BREAK'):
-        return 0
-    elif opcode == 'LOAD_LOCALS':
-        return 0
-    elif opcode == 'RETURN_VALUE':
-        return 0
-    elif opcode == 'YIELD_VALUE':
-        return 0
-    elif opcode == 'IMPORT_STAR':
-        return 0
-    elif opcode == 'END_FINALLY':
-        return 0
-    elif opcode == 'BUILD_CLASS':
-        return 0
-    elif opcode == 'WITH_CLEANUP':
-        return 0
-    elif opcode == 'EXEC_STMT':
-        return 0
-    else:
-        return 1
+# ---------------------------------------------------------------------------
+# Bytecode decode cache (WeakKeyDictionary — auto-evicts when code object dies)
+# ---------------------------------------------------------------------------
+_DECODE_CACHE = _weakref_mod.WeakKeyDictionary()
+_DECODE_HITS = 0
+_DECODE_MISSES = 0
 
 
-def bytecode_optimize(bytecode):
-    bytecode_list = []
+def _decode_uncached(code):
+    """Build the full decode payload for a code object (not cached).
+
+    Returns (instructions, offset_to_index, argvals, exc_table).
+    instructions: list of (opname, arg, offset) tuples.
+    offset_to_index: dict mapping byte offset -> instruction index.
+    argvals: list of resolved argval per instruction (for jump targets).
+    exc_table: list of (start, end, target, depth) tuples.
+    """
+    raw = list(_dis_mod.get_instructions(code, adaptive=False,
+                                         show_caches=False))
+    instructions = []
     offset_to_index = {}
-    raw = bytecode.co_code
-    # Normalize co_code to a list of ints once.  In Python 3, bytes[i] already
-    # yields an int.  In Python 2, co_code is a str and each element is a char
-    # that needs ord() — there is no dunder equivalent for that conversion.
-    code = []
-    for b in raw:
-        if b.__class__.__name__ == 'int':
-            code.append(b)
-        else:
-            code.append(ord(b))  # Python 2: char -> int, no dunder alternative
-    # Python 3 uses WORDCODE: every instruction is exactly 2 bytes (opcode, arg).
-    # Python 2 uses variable-width: 1 byte for no-arg, 3 bytes for arg instructions.
-    # Detect format by checking if co_code is a bytes object (Python 3) or str (Python 2).
-    py3_wordcode = (raw.__class__.__name__ == 'bytes')
-    i = 0
-    index_counter = 0
-    extended_arg = 0  # accumulator for EXTENDED_ARG prefix in wordcode mode
-    pending_ext_offsets = []  # EXTENDED_ARG offsets waiting to be mapped
-    while True:
+    argvals = []
+    for idx, instr in enumerate(raw):
+        offset_to_index[instr.offset] = idx
+        arg = instr.arg if instr.arg is not None else 0
+        instructions.append((instr.opname, arg, instr.offset))
+        argvals.append(instr.argval)
+    exc_table = []
+    if hasattr(code, 'co_exceptiontable') and code.co_exceptiontable:
         try:
-            opcode_byte = code[i]
-        except IndexError:
-            break
-        offset = i
-        i += 1
-        if py3_wordcode:
-            # Python 3 WORDCODE: always read one arg byte
-            try:
-                arg = code[i]
-            except IndexError:
-                arg = 0
-            i += 1
-            if opcode_byte == 0:  # CACHE / padding — skip
-                continue
-            opcode_value = OPNAME[opcode_byte]
-            if opcode_value == 'EXTENDED_ARG':
-                # Accumulate high bits for the next instruction's arg.
-                # Save the offset so jump targets that land here map to
-                # the following real instruction.
-                extended_arg = (extended_arg | arg) << 8
-                pending_ext_offsets.append(offset)
-                continue
-            arg = extended_arg | arg
-            extended_arg = 0
-            # In wordcode, jump args are instruction counts (words), not bytes.
-            # Multiply by 2 to convert to byte offsets.
-            if opcode_value in ('JUMP_FORWARD', 'FOR_ITER',
-                                'POP_JUMP_FORWARD_IF_FALSE',
-                                'POP_JUMP_FORWARD_IF_TRUE',
-                                'POP_JUMP_FORWARD_IF_NONE',
-                                'POP_JUMP_FORWARD_IF_NOT_NONE',
-                                'SETUP_LOOP', 'SETUP_EXCEPT', 'SETUP_FINALLY'):
-                arg = i + arg * 2
-            elif opcode_value in ('JUMP_BACKWARD',
-                                  'POP_JUMP_BACKWARD_IF_TRUE',
-                                  'POP_JUMP_BACKWARD_IF_FALSE'):
-                arg = i - arg * 2
+            for entry in _dis_mod._parse_exception_table(code):
+                exc_table.append((entry.start, entry.end, entry.target, entry.depth,
+                                  getattr(entry, 'lasti', False)))
+        except Exception:
+            pass
+    return (instructions, offset_to_index, argvals, exc_table)
+
+
+def decode_cached(code):
+    """Return cached (instructions, offset_to_index, argvals, exc_table)."""
+    global _DECODE_HITS, _DECODE_MISSES
+    hit = _DECODE_CACHE.get(code)
+    if hit is not None:
+        _DECODE_HITS += 1
+        return hit
+    _DECODE_MISSES += 1
+    payload = _decode_uncached(code)
+    _DECODE_CACHE[code] = payload
+    return payload
+
+
+def decode_cache_stats():
+    """Return (hits, misses, current_size) for decode cache."""
+    return (_DECODE_HITS, _DECODE_MISSES, len(_DECODE_CACHE))
+
+
+def _get_builtins():
+    """Return builtins as a dict."""
+    try:
+        return __builtins__ if isinstance(__builtins__, dict) else __builtins__.__dict__
+    except Exception:
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# Frame — holds all per-invocation state
+# ---------------------------------------------------------------------------
+class Frame:
+    __slots__ = (
+        'code', 'ip', 'stack', 'locals_fast', 'cells', 'freevars',
+        'globals', 'builtins', 'block_stack', 'name_dict',
+        'kw_names', 'instructions', 'offset_to_index', 'argvals',
+        'exc_table',
+    )
+
+    def __init__(self, code, globals_dict, builtins_dict, closure=None):
+        self.code = code
+        self.ip = 0
+        self.stack = []
+        self.locals_fast = [_UNSET] * code.co_nlocals
+        # Cell vars: one mutable [value] cell per co_cellvars entry
+        self.cells = [None] * len(code.co_cellvars)
+        # Free vars: supplied by closure tuple
+        if closure:
+            self.freevars = list(closure)
         else:
-            # Python 2 variable-width format
-            if opcode_byte == 0:
-                continue
-            opcode_value = OPNAME[opcode_byte]
-            if hasarg(opcode_value):
-                arg = code[i] | (code[i + 1] << 8)
-                i += 2
-                if opcode_value in ('JUMP_FORWARD', 'FOR_ITER',
-                                    'SETUP_LOOP', 'SETUP_EXCEPT', 'SETUP_FINALLY'):
-                    arg = i + arg
-            else:
-                arg = 0
-        # Map any preceding EXTENDED_ARG offsets to this instruction's index
-        # so that jump targets pointing to an EXTENDED_ARG site resolve correctly.
-        for _ext_off in pending_ext_offsets:
-            offset_to_index[_ext_off] = index_counter
-        pending_ext_offsets = []
-        offset_to_index[offset] = index_counter
-        bytecode_list.append([opcode_value, arg, offset])
-        index_counter += 1
-    return bytecode_list, offset_to_index
+            self.freevars = [None] * len(code.co_freevars)
+        self.globals = globals_dict
+        self.builtins = builtins_dict
+        self.block_stack = []
+        self.name_dict = {}  # module-scope names keyed by index
+        self.kw_names = ()
+        instructions, offset_to_index, argvals, exc_table = decode_cached(code)
+        self.instructions = instructions
+        self.offset_to_index = offset_to_index
+        self.argvals = argvals
+        self.exc_table = exc_table
 
 
-def buildcode(code):
-    return py2vm(compile(code, '<none>', 'exec'))
+# ---------------------------------------------------------------------------
+# VMFunction — a guest-code callable (replaces host-recursive _mf_make)
+# ---------------------------------------------------------------------------
+class VMFunction:
+    __slots__ = ('code', 'globals', 'defaults', 'kwdefaults',
+                 'closure', 'name', 'annotations')
+
+    def __init__(self, code, globals_dict, defaults=(), closure=None,
+                 kwdefaults=None, annotations=None):
+        self.code = code
+        self.globals = globals_dict
+        self.defaults = defaults
+        self.closure = closure
+        self.kwdefaults = kwdefaults
+        self.annotations = annotations
+        self.name = code.co_name
 
 
-def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None, globals_frame=None):
+def _bind_args(frame, vmfunc, args, kwargs):
+    """Populate frame.locals_fast from positional/keyword args + defaults."""
+    co = vmfunc.code
+    nparams = co.co_argcount
+    defaults = vmfunc.defaults or ()
+    n_defaults = len(defaults)
+    first_default = nparams - n_defaults
 
-    if rec_log != False:
+    # Apply defaults first
+    for i in range(n_defaults):
+        frame.locals_fast[first_default + i] = defaults[i]
+
+    # Apply keyword-only defaults
+    if vmfunc.kwdefaults:
+        kw_start = nparams
+        for i in range(co.co_kwonlyargcount):
+            name = co.co_varnames[kw_start + i]
+            if name in vmfunc.kwdefaults:
+                frame.locals_fast[kw_start + i] = vmfunc.kwdefaults[name]
+
+    # Positional args
+    for i in range(min(nparams, len(args))):
+        frame.locals_fast[i] = args[i]
+
+    # *args (CO_VARARGS = 0x04)
+    if co.co_flags & 0x04:
+        varargs_idx = nparams + co.co_kwonlyargcount
+        frame.locals_fast[varargs_idx] = tuple(args[nparams:])
+    # **kwargs (CO_VARKEYWORDS = 0x08)
+    if co.co_flags & 0x08:
+        varkw_idx = nparams + co.co_kwonlyargcount + (1 if co.co_flags & 0x04 else 0)
+        own_kwargs = {}
+        for k, v in kwargs.items():
+            # Check if it's a named parameter
+            try:
+                idx = list(co.co_varnames[:nparams + co.co_kwonlyargcount]).index(k)
+                frame.locals_fast[idx] = v
+            except ValueError:
+                own_kwargs[k] = v
+        frame.locals_fast[varkw_idx] = own_kwargs
+    else:
+        # Spread keyword args into named parameters
+        for k, v in kwargs.items():
+            try:
+                idx = list(co.co_varnames[:nparams + co.co_kwonlyargcount]).index(k)
+                frame.locals_fast[idx] = v
+            except ValueError:
+                pass
+
+
+# ---------------------------------------------------------------------------
+# BINARY_OP dispatch table (Python 3.11)
+# Regular: 0=+ 1=& 2=// 3=<< 5=* 6=% 7=| 8=** 9=>> 10=- 11=/ 12=^
+# Inplace: add 13 to regular arg
+# ---------------------------------------------------------------------------
+def _binary_op(op_arg, a, b):
+    """Execute BINARY_OP: a op b where a is TOS1 and b is TOS."""
+    base = op_arg if op_arg < 13 else op_arg - 13
+    if base == 0:  return a + b
+    if base == 1:  return a & b
+    if base == 2:  return a // b
+    if base == 3:  return a << b
+    if base == 5:  return a * b
+    if base == 6:  return a % b
+    if base == 7:  return a | b
+    if base == 8:  return a ** b
+    if base == 9:  return a >> b
+    if base == 10: return a - b
+    if base == 11: return a / b
+    if base == 12: return a ^ b
+    return NotImplemented
+
+
+# ---------------------------------------------------------------------------
+# Tier 6 rejection set
+# ---------------------------------------------------------------------------
+_TIER6_OPCODES = frozenset({
+    'RETURN_GENERATOR', 'YIELD_VALUE', 'SEND', 'GET_YIELD_FROM_ITER',
+    'GET_AWAITABLE', 'ASYNC_GEN_WRAP', 'BEFORE_ASYNC_WITH',
+    'END_ASYNC_FOR', 'SETUP_ANNOTATIONS',
+})
+
+
+# ---------------------------------------------------------------------------
+# Main interpreter
+# ---------------------------------------------------------------------------
+def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None,
+          globals_frame=None):
+
+    if rec_log is not False and rec_log:
         log = rec_log
     else:
         log = _StringIO()
         log.write('py2vm output:\n')
 
-    if stack != False:
-        const_stack = stack
-    else:
-        const_stack = []
+    builtins = _get_builtins()
+    globals_dict = (globals_frame if globals_frame is not None
+                    else {'__builtins__': __builtins__})
 
-    fast_dict = fast_locals if fast_locals is not None else {}
-    # Detect Python 3 wordcode: co_code is bytes (int-indexable) vs str (Python 2)
-    py3_mode = (bytecode.co_code.__class__.__name__ == 'bytes')
+    # Build initial frame
+    frame0 = Frame(bytecode, globals_dict, builtins)
+    if fast_locals:
+        for name, val in fast_locals.items():
+            if name == '__closure__':
+                continue
+            try:
+                idx = list(frame0.code.co_varnames).index(name)
+                frame0.locals_fast[idx] = val
+            except ValueError:
+                pass
+        # Handle closure cells passed via fast_locals
+        closure = fast_locals.get('__closure__')
+        if closure is not None:
+            for ci in range(min(len(closure), len(frame0.freevars))):
+                frame0.freevars[ci] = closure[ci]
 
-    block_stack = []
+    frames = [frame0]
+    final_retval = None
 
-    __INTERNAL__DEBUG_LOG = 1
-    __INTERNAL__DEBUG_LOG_CONST = 0
-    __INTERNAL__DEBUG_LOG_VAR = 0
-    name_dict = {}
-    globals_frame = globals_frame if globals_frame is not None else {'__builtins__': __builtins__}
-    # Cell variable storage: maps localsplus-index → [value] (mutable cell)
-    _cells = {}
-    # Free variable cells: list of [value] cells, one per co_freevars entry
-    _free_cells = [None] * len(bytecode.co_freevars)
+    while frames:
+        f = frames[-1]
+        if f.ip >= len(f.instructions):
+            # Implicit return None at end of code
+            frames.pop()
+            if frames:
+                frames[-1].stack.append(None)
+            continue
 
-    # Factory: create a real callable that runs a code object through the VM.
-    # Using a factory rather than a bare closure ensures each call captures its
-    # own _co/_gf values rather than sharing a reference to the loop variable.
-    def _mf_make(_co, _gf, _defaults=(), _closure=None):
-        def _mf_callable(*_args, **_kwargs):
-            _fl = {}
-            # Apply default values first so all parameters have correct defaults.
-            # _defaults is the positional-defaults tuple captured at MAKE_FUNCTION
-            # time (Python stores defaults on the function, not the code object).
-            _num_params = _co.co_argcount
-            _num_defaults = len(_defaults)
-            _first_default = _num_params - _num_defaults
-            _di = 0
-            while _di < _num_defaults:
-                _fl[_co.co_varnames[_first_default + _di]] = _defaults[_di]
-                _di += 1
-            # Apply positional args to regular parameters (indices 0..co_argcount-1).
-            _idx = 0
-            while _idx < _num_params and _idx < len(_args):
-                _fl[_co.co_varnames[_idx]] = _args[_idx]
-                _idx += 1
-            # If the function has a *args parameter (CO_VARARGS = 0x04), assign the
-            # remaining positional args as a tuple to co_varnames[co_argcount].
-            if _co.co_flags & 0x04:
-                _fl[_co.co_varnames[_num_params]] = _args[_num_params:]
-            # If the function has a **kwargs parameter (CO_VARKEYWORDS = 0x08),
-            # assign the entire kwargs dict to the **kwargs variable name.
-            # Otherwise spread individual keyword args by name (handles VM-level
-            # calls like py2vm(..., fast_locals=..., globals_frame=...)).
-            if _co.co_flags & 0x08:
-                _kw_idx = _num_params + (1 if _co.co_flags & 0x04 else 0)
-                _fl[_co.co_varnames[_kw_idx]] = _kwargs
-            else:
-                for _kname, _kval in _kwargs.items():
-                    _fl[_kname] = _kval
-            # Pass closure cells so COPY_FREE_VARS can populate _free_cells.
-            if _closure is not None:
-                _fl['__closure__'] = _closure
-            _rs, _ig = py2vm(_co, [], False, fast_locals=_fl, globals_frame=_gf)
-            return _rs[0] if _rs else None
-        return _mf_callable
+        opname, arg, offset = f.instructions[f.ip]
+        argval = f.argvals[f.ip]
+        f.ip += 1
+        stk = f.stack
 
-    # I was inspired by str8C
-    i = -1
-    opcode_array, offset_to_index = bytecode_optimize(bytecode)
+        # ---------------------------------------------------------------
+        # Tier 6 rejection
+        # ---------------------------------------------------------------
+        if opname in _TIER6_OPCODES:
+            raise NotImplementedError(
+                "Generator/async opcode not supported: %s" % opname)
 
-    # Build exception table for Python 3.11+ so try/except in interpreted code works.
-    _exc_table = []
-    if py3_mode and hasattr(bytecode, 'co_exceptiontable') and bytecode.co_exceptiontable:
-        try:
-            import dis as _dis_mod
-            for _et in _dis_mod._parse_exception_table(bytecode):
-                _exc_table.append((_et.start, _et.end, _et.target, _et.depth))
-        except Exception:
-            pass
+        try:  # __exc_handler__
 
-    # Keyword-argument names set by KW_NAMES before a CALL opcode.
-    _kw_names = ()
+            # ---------------------------------------------------------------
+            # NOP / RESUME / PRECALL
+            # ---------------------------------------------------------------
+            if opname == 'NOP' or opname == 'RESUME' or opname == 'PRECALL':
+                pass
 
-    while True:
-        i += 1
-        try:
-            opcode_pack = opcode_array[i]
-        except IndexError:
-            break
-        opcode_value = opcode_pack[0]
-        arg = opcode_pack[1]
-        # Bytecode offset of this instruction (used for exception table lookup).
-        _cur_offset = opcode_pack[2] if len(opcode_pack) > 2 else -1
+            # ---------------------------------------------------------------
+            # Stack manipulation
+            # ---------------------------------------------------------------
+            elif opname == 'POP_TOP':
+                if stk:
+                    stk.pop()
 
-        # log.write(const_stack)
-        # log.write(opcode_value)
+            elif opname == 'PUSH_NULL':
+                stk.append(_NULL)
 
-        if __INTERNAL__DEBUG_LOG_CONST:
-            log.write(const_stack.__str__() + '\n')
+            elif opname == 'SWAP':
+                # SWAP(i): swap TOS with stack[-i] (1-indexed from TOS)
+                if arg > 1 and len(stk) >= arg:
+                    stk[-1], stk[-arg] = stk[-arg], stk[-1]
 
-        if __INTERNAL__DEBUG_LOG_VAR:
-            log.write(name_dict.__str__() + '\n')
+            elif opname == 'COPY':
+                # COPY(i): push a copy of stack[-i]
+                if arg > 0 and len(stk) >= arg:
+                    stk.append(stk[-arg])
 
-        if opcode_value == 'NOP':
-            if __INTERNAL__DEBUG_LOG:
-                log.write('DEBUG => internal placeholder\n')
+            elif opname == 'ROT_TWO':
+                stk[-1], stk[-2] = stk[-2], stk[-1]
 
-        elif opcode_value == 'RESUME':
-            # Python 3.11: entry point marker — treated as NOP
-            if __INTERNAL__DEBUG_LOG:
-                log.write('DEBUG => RESUME (Python 3.11 entry marker)\n')
+            elif opname == 'ROT_THREE':
+                a = stk.pop()
+                stk.insert(-2, a)
 
-        elif opcode_value == 'PUSH_NULL':
-            # Python 3.11: push NULL sentinel before a non-method callable
-            const_stack.insert(0, None)
-            if __INTERNAL__DEBUG_LOG:
-                log.write('DEBUG => PUSH_NULL\n')
+            elif opname == 'ROT_FOUR':
+                a = stk.pop()
+                stk.insert(-3, a)
 
-        elif opcode_value == 'PRECALL':
-            # Python 3.11: pre-call check — treated as NOP
-            if __INTERNAL__DEBUG_LOG:
-                log.write('DEBUG => PRECALL\n')
+            elif opname == 'DUP_TOP':
+                stk.append(stk[-1])
 
-        elif opcode_value == 'POP_TOP':
-            if const_stack:
-                del const_stack[0]
+            # ---------------------------------------------------------------
+            # Load / Store constants and locals
+            # ---------------------------------------------------------------
+            elif opname == 'LOAD_CONST':
+                stk.append(f.code.co_consts[arg])
 
-            if __INTERNAL__DEBUG_LOG:
-                log.write('DEBUG => removed top of stack\n')
+            elif opname == 'LOAD_FAST':
+                val = f.locals_fast[arg]
+                if val is _UNSET:
+                    stk.append(None)
+                else:
+                    stk.append(val)
 
-        elif opcode_value == 'ROT_TWO':
-            stk2 = const_stack.pop(0)
-            const_stack.insert(1, stk2)
+            elif opname == 'STORE_FAST':
+                f.locals_fast[arg] = stk.pop()
 
-            if __INTERNAL__DEBUG_LOG:
-                log.write('DEBUG => rotated top two stack items\n')
+            elif opname == 'DELETE_FAST':
+                f.locals_fast[arg] = _UNSET
 
-        elif opcode_value == 'ROT_THREE':
-            stk2 = const_stack.pop(0)
-            const_stack.insert(2, stk2)
+            # ---------------------------------------------------------------
+            # Name operations (module scope)
+            # ---------------------------------------------------------------
+            elif opname == 'LOAD_NAME':
+                val = f.name_dict.get(arg)
+                if val is None:
+                    name_str = f.code.co_names[arg]
+                    val = f.globals.get(name_str)
+                    if val is None:
+                        val = builtins.get(name_str)
+                stk.append(val)
 
-            if __INTERNAL__DEBUG_LOG:
-                log.write('DEBUG => moved top of stack down 2\n')
+            elif opname == 'STORE_NAME':
+                val = stk.pop()
+                f.name_dict[arg] = val
+                f.globals[f.code.co_names[arg]] = val
 
-        elif opcode_value == 'ROT_FOUR':
-            stk2 = const_stack.pop(0)
-            const_stack.insert(3, stk2)
+            elif opname == 'DELETE_NAME':
+                f.name_dict.pop(arg, None)
+                f.globals.pop(f.code.co_names[arg], None)
 
-            if __INTERNAL__DEBUG_LOG:
-                log.write('DEBUG => moved top of stack down 3\n')
+            # ---------------------------------------------------------------
+            # Global operations
+            # ---------------------------------------------------------------
+            elif opname == 'LOAD_GLOBAL':
+                # 3.11: arg = (name_index << 1) | push_null_flag
+                name_idx = arg >> 1
+                push_null = arg & 1
+                name_str = f.code.co_names[name_idx]
+                val = f.globals.get(name_str)
+                if val is None:
+                    val = builtins.get(name_str)
+                if push_null:
+                    stk.append(_NULL)
+                stk.append(val)
 
-        elif opcode_value == 'DUP_TOP':
-            const_stack.insert(0, const_stack[0])
+            elif opname == 'STORE_GLOBAL':
+                f.globals[f.code.co_names[arg]] = stk.pop()
 
-            if __INTERNAL__DEBUG_LOG:
-                log.write('DEBUG => duplicated top of stack\n')
+            elif opname == 'DELETE_GLOBAL':
+                f.globals.pop(f.code.co_names[arg], None)
 
-        elif opcode_value == 'LOAD_CONST':
-            const_stack.insert(0, bytecode.co_consts[arg])
+            # ---------------------------------------------------------------
+            # Attribute operations
+            # ---------------------------------------------------------------
+            elif opname == 'LOAD_ATTR':
+                obj = stk.pop()
+                stk.append(getattr(obj, f.code.co_names[arg]))
 
-            if __INTERNAL__DEBUG_LOG:
-                log.write(
-                    'DEBUG => loaded %s on to stack\n' % (bytecode.co_consts[arg],))
+            elif opname == 'STORE_ATTR':
+                obj = stk.pop()
+                val = stk.pop()
+                setattr(obj, f.code.co_names[arg], val)
 
-        elif opcode_value == 'LOAD_FAST':
-            var_name = bytecode.co_varnames[arg]
-            const_stack.insert(0, fast_dict.get(var_name))
+            elif opname == 'DELETE_ATTR':
+                obj = stk.pop()
+                delattr(obj, f.code.co_names[arg])
 
-            if __INTERNAL__DEBUG_LOG:
-                log.write(
-                    'DEBUG => loaded %s (%s) on to stack\n' % (var_name, fast_dict.get(var_name)))
+            elif opname == 'LOAD_METHOD':
+                # getattr returns a bound method, so push NULL + bound_method.
+                # CALL will pop NULL and not prepend self (already bound).
+                obj = stk.pop()
+                attr = getattr(obj, f.code.co_names[arg])
+                stk.append(_NULL)  # NULL sentinel (self already bound)
+                stk.append(attr)   # bound method at TOS
 
-        elif opcode_value == 'LOAD_NAME':
-            _load_name_val = name_dict.get(arg)
-            if _load_name_val is None:
-                # Fall back to Python builtins for names like 'print', 'range', etc.
-                _name_str = bytecode.co_names[arg]
+            # ---------------------------------------------------------------
+            # Unary operations (fixed: in-place replace, no stack leak)
+            # ---------------------------------------------------------------
+            elif opname == 'UNARY_POSITIVE':
+                stk[-1] = +stk[-1]
+
+            elif opname == 'UNARY_NEGATIVE':
+                stk[-1] = -stk[-1]
+
+            elif opname == 'UNARY_NOT':
+                stk[-1] = not stk[-1]
+
+            elif opname == 'UNARY_INVERT':
+                stk[-1] = ~stk[-1]
+
+            elif opname == 'GET_ITER':
+                stk[-1] = iter(stk[-1])
+
+            # ---------------------------------------------------------------
+            # Binary operations
+            # ---------------------------------------------------------------
+            elif opname == 'BINARY_OP':
+                b = stk.pop()
+                a = stk.pop()
+                stk.append(_binary_op(arg, a, b))
+
+            elif opname == 'BINARY_SUBSCR':
+                key = stk.pop()
+                obj = stk.pop()
+                stk.append(obj[key])
+
+            elif opname == 'STORE_SUBSCR':
+                key = stk.pop()
+                obj = stk.pop()
+                val = stk.pop()
+                obj[key] = val
+
+            elif opname == 'DELETE_SUBSCR':
+                key = stk.pop()
+                obj = stk.pop()
+                del obj[key]
+
+            # ---------------------------------------------------------------
+            # Comparison
+            # ---------------------------------------------------------------
+            elif opname == 'COMPARE_OP':
+                b = stk.pop()
+                a = stk.pop()
+                op_name = CMP_OP[arg]
+                if   op_name == '<':      result = a < b
+                elif op_name == '<=':     result = a <= b
+                elif op_name == '==':     result = a == b
+                elif op_name == '!=':     result = a != b
+                elif op_name == '>':      result = a > b
+                elif op_name == '>=':     result = a >= b
+                elif op_name == 'in':     result = a in b
+                elif op_name == 'not in': result = a not in b
+                elif op_name == 'is':     result = a is b
+                elif op_name == 'is not': result = a is not b
+                else:                     result = False
+                stk.append(result)
+
+            elif opname == 'IS_OP':
+                b = stk.pop()
+                a = stk.pop()
+                stk.append((a is not b) if arg else (a is b))
+
+            elif opname == 'CONTAINS_OP':
+                container = stk.pop()
+                item = stk.pop()
                 try:
-                    _load_name_val = __builtins__[_name_str]
+                    stk.append((item not in container) if arg else (item in container))
                 except TypeError:
-                    try:
-                        _load_name_val = __builtins__.__dict__[_name_str]
-                    except KeyError:
-                        _load_name_val = None
-                except KeyError:
-                    _load_name_val = None
-            const_stack.insert(0, _load_name_val)
+                    stk.append(False)
 
-            if __INTERNAL__DEBUG_LOG:
-                log.write('DEBUG => loaded %s on to stack\n' % (_load_name_val,))
+            # ---------------------------------------------------------------
+            # Jump operations
+            # ---------------------------------------------------------------
+            elif opname == 'JUMP_FORWARD':
+                f.ip = f.offset_to_index[argval]
 
-        elif opcode_value == 'LOAD_GLOBAL':
-            # Python 3.11: arg = (name_index << 1) | push_null_flag
-            # Python 2: arg is the name index directly
-            _lg_idx = (arg >> 1) if py3_mode else arg
-            _lg_push_null = (arg & 1) if py3_mode else 0
-            _lg_name = bytecode.co_names[_lg_idx]
-            # Check local name_dict first (keyed by index in current co_names),
-            # then the shared string-keyed globals_frame, then builtins.
-            _lg_val = name_dict.get(_lg_idx)
-            if _lg_val is None:
-                _lg_val = globals_frame.get(_lg_name)
-            if _lg_val is None:
+            elif opname == 'JUMP_BACKWARD':
+                f.ip = f.offset_to_index[argval]
+
+            elif opname == 'JUMP_BACKWARD_NO_INTERRUPT':
+                f.ip = f.offset_to_index[argval]
+
+            elif opname == 'JUMP_ABSOLUTE':
+                f.ip = f.offset_to_index[argval]
+
+            elif opname == 'POP_JUMP_FORWARD_IF_FALSE':
+                if not stk.pop():
+                    f.ip = f.offset_to_index[argval]
+
+            elif opname == 'POP_JUMP_FORWARD_IF_TRUE':
+                if stk.pop():
+                    f.ip = f.offset_to_index[argval]
+
+            elif opname == 'POP_JUMP_BACKWARD_IF_FALSE':
+                if not stk.pop():
+                    f.ip = f.offset_to_index[argval]
+
+            elif opname == 'POP_JUMP_BACKWARD_IF_TRUE':
+                if stk.pop():
+                    f.ip = f.offset_to_index[argval]
+
+            elif opname == 'POP_JUMP_FORWARD_IF_NONE':
+                if stk.pop() is None:
+                    f.ip = f.offset_to_index[argval]
+
+            elif opname == 'POP_JUMP_FORWARD_IF_NOT_NONE':
+                if stk.pop() is not None:
+                    f.ip = f.offset_to_index[argval]
+
+            elif opname == 'POP_JUMP_BACKWARD_IF_NONE':
+                if stk.pop() is None:
+                    f.ip = f.offset_to_index[argval]
+
+            elif opname == 'POP_JUMP_BACKWARD_IF_NOT_NONE':
+                if stk.pop() is not None:
+                    f.ip = f.offset_to_index[argval]
+
+            elif opname == 'POP_JUMP_IF_FALSE':
+                if not stk.pop():
+                    f.ip = f.offset_to_index[argval]
+
+            elif opname == 'POP_JUMP_IF_TRUE':
+                if stk.pop():
+                    f.ip = f.offset_to_index[argval]
+
+            elif opname == 'JUMP_IF_TRUE_OR_POP':
+                if stk[-1]:
+                    f.ip = f.offset_to_index[argval]
+                else:
+                    stk.pop()
+
+            elif opname == 'JUMP_IF_FALSE_OR_POP':
+                if not stk[-1]:
+                    f.ip = f.offset_to_index[argval]
+                else:
+                    stk.pop()
+
+            # ---------------------------------------------------------------
+            # Iteration
+            # ---------------------------------------------------------------
+            elif opname == 'FOR_ITER':
                 try:
-                    _lg_val = __builtins__[_lg_name]
+                    stk.append(next(stk[-1]))
+                except StopIteration:
+                    stk.pop()  # pop iterator
+                    f.ip = f.offset_to_index[argval]
+
+            elif opname == 'END_FOR':
+                stk.pop()  # last value
+                stk.pop()  # iterator
+
+            # ---------------------------------------------------------------
+            # Build collections
+            # ---------------------------------------------------------------
+            elif opname == 'BUILD_LIST':
+                if arg == 0:
+                    stk.append([])
+                else:
+                    items = stk[-arg:]
+                    del stk[-arg:]
+                    stk.append(items)
+
+            elif opname == 'BUILD_TUPLE':
+                if arg == 0:
+                    stk.append(())
+                else:
+                    items = tuple(stk[-arg:])
+                    del stk[-arg:]
+                    stk.append(items)
+
+            elif opname == 'BUILD_SET':
+                if arg == 0:
+                    stk.append(set())
+                else:
+                    items = set(stk[-arg:])
+                    del stk[-arg:]
+                    stk.append(items)
+
+            elif opname == 'BUILD_MAP':
+                if arg == 0:
+                    stk.append({})
+                else:
+                    d = {}
+                    pairs = stk[-2*arg:]
+                    del stk[-2*arg:]
+                    for i in range(0, 2*arg, 2):
+                        d[pairs[i]] = pairs[i+1]
+                    stk.append(d)
+
+            elif opname == 'BUILD_CONST_KEY_MAP':
+                keys = stk.pop()
+                vals = stk[-arg:]
+                del stk[-arg:]
+                stk.append(dict(zip(keys, vals)))
+
+            elif opname == 'BUILD_SLICE':
+                if arg == 3:
+                    step = stk.pop()
+                    stop = stk.pop()
+                    start = stk.pop()
+                    stk.append(slice(start, stop, step))
+                else:
+                    stop = stk.pop()
+                    start = stk.pop()
+                    stk.append(slice(start, stop))
+
+            elif opname == 'BUILD_STRING':
+                parts = stk[-arg:]
+                del stk[-arg:]
+                stk.append(''.join(str(p) for p in parts))
+
+            elif opname == 'LIST_APPEND':
+                val = stk.pop()
+                stk[-arg].append(val)
+
+            elif opname == 'LIST_EXTEND':
+                items = stk.pop()
+                stk[-arg].extend(items)
+
+            elif opname == 'LIST_TO_TUPLE':
+                stk[-1] = tuple(stk[-1])
+
+            elif opname == 'SET_ADD':
+                val = stk.pop()
+                stk[-arg].add(val)
+
+            elif opname == 'SET_UPDATE':
+                items = stk.pop()
+                stk[-arg].update(items)
+
+            elif opname == 'MAP_ADD':
+                val = stk.pop()
+                key = stk.pop()
+                stk[-arg][key] = val
+
+            elif opname in ('DICT_UPDATE', 'DICT_MERGE'):
+                other = stk.pop()
+                stk[-arg].update(other)
+
+            elif opname == 'UNPACK_SEQUENCE':
+                seq = list(stk.pop())
+                for item in reversed(seq):
+                    stk.append(item)
+
+            elif opname == 'UNPACK_EX':
+                count_before = arg & 0xFF
+                count_after = arg >> 8
+                seq = list(stk.pop())
+                if count_after:
+                    starred = seq[count_before:-count_after]
+                    after = seq[-count_after:]
+                else:
+                    starred = seq[count_before:]
+                    after = []
+                for a_item in reversed(after):
+                    stk.append(a_item)
+                stk.append(starred)
+                for i in range(count_before - 1, -1, -1):
+                    stk.append(seq[i])
+
+            # ---------------------------------------------------------------
+            # String formatting
+            # ---------------------------------------------------------------
+            elif opname == 'FORMAT_VALUE':
+                have_spec = bool(arg & 0x04)
+                conv = arg & 0x03
+                spec = stk.pop() if have_spec else ''
+                val = stk.pop()
+                if conv == 1:   val = str(val)
+                elif conv == 2: val = repr(val)
+                elif conv == 3: val = ascii(val)
+                stk.append(format(val, spec))
+
+            # ---------------------------------------------------------------
+            # Cell / closure operations
+            # ---------------------------------------------------------------
+            elif opname == 'MAKE_CELL':
+                # Convert local at localsplus[arg] to a cell.
+                # arg is co_varnames index for cellvars that are params.
+                cell_idx = arg - f.code.co_nlocals if arg >= f.code.co_nlocals else None
+                if cell_idx is not None and 0 <= cell_idx < len(f.cells):
+                    f.cells[cell_idx] = [None]
+                else:
+                    # cellvar that is also a local parameter
+                    init_val = f.locals_fast[arg] if arg < len(f.locals_fast) and f.locals_fast[arg] is not _UNSET else None
+                    # Find which cellvar index this corresponds to
+                    varname = f.code.co_varnames[arg] if arg < len(f.code.co_varnames) else ''
+                    try:
+                        ci = list(f.code.co_cellvars).index(varname)
+                        f.cells[ci] = [init_val]
+                    except ValueError:
+                        pass
+
+            elif opname == 'LOAD_CLOSURE':
+                # Push cell for cellvar at localsplus[arg]
+                nlocals = f.code.co_nlocals
+                if arg >= nlocals:
+                    ci = arg - nlocals
+                    if ci < len(f.cells):
+                        stk.append(f.cells[ci])
+                    else:
+                        stk.append([None])
+                else:
+                    varname = f.code.co_varnames[arg] if arg < len(f.code.co_varnames) else ''
+                    try:
+                        ci = list(f.code.co_cellvars).index(varname)
+                        stk.append(f.cells[ci])
+                    except ValueError:
+                        stk.append([None])
+
+            elif opname == 'LOAD_DEREF':
+                nlocals = f.code.co_nlocals
+                ncells = len(f.code.co_cellvars)
+                _deref_val = _UNSET
+                if arg < nlocals + ncells:
+                    ci = arg - nlocals
+                    if 0 <= ci < len(f.cells):
+                        cell = f.cells[ci]
+                        _deref_val = cell[0] if cell is not None else _UNSET
+                else:
+                    fi = arg - nlocals - ncells
+                    if 0 <= fi < len(f.freevars):
+                        cell = f.freevars[fi]
+                        _deref_val = cell[0] if cell is not None else _UNSET
+                if _deref_val is _UNSET:
+                    if arg < nlocals + ncells:
+                        _dn = f.code.co_cellvars[arg - nlocals] if (arg - nlocals) < ncells else '?'
+                    else:
+                        _fi = arg - nlocals - ncells
+                        _dn = f.code.co_freevars[_fi] if _fi < len(f.code.co_freevars) else '?'
+                    raise NameError("free variable '%s' referenced before assignment in enclosing scope" % _dn)
+                stk.append(_deref_val)
+
+            elif opname == 'LOAD_CLASSDEREF':
+                nlocals = f.code.co_nlocals
+                ncells = len(f.code.co_cellvars)
+                _cd_val = _UNSET
+                # Try cell/free var first
+                if arg < nlocals + ncells:
+                    ci = arg - nlocals
+                    if 0 <= ci < len(f.cells) and f.cells[ci] is not None:
+                        _cd_val = f.cells[ci][0]
+                else:
+                    fi = arg - nlocals - ncells
+                    if 0 <= fi < len(f.freevars) and f.freevars[fi] is not None:
+                        _cd_val = f.freevars[fi][0]
+                if _cd_val is _UNSET:
+                    # Fallback: class namespace, then globals, then builtins
+                    if arg < nlocals + ncells:
+                        _cdn = f.code.co_cellvars[arg - nlocals] if (arg - nlocals) < ncells else ''
+                    else:
+                        _fi = arg - nlocals - ncells
+                        _cdn = f.code.co_freevars[_fi] if _fi < len(f.code.co_freevars) else ''
+                    _cd_val = f.globals.get(_cdn, _UNSET)
+                    if _cd_val is _UNSET:
+                        _cd_val = builtins.get(_cdn)
+                stk.append(_cd_val)
+
+            elif opname == 'STORE_DEREF':
+                val = stk.pop()
+                nlocals = f.code.co_nlocals
+                ncells = len(f.code.co_cellvars)
+                if arg < nlocals + ncells:
+                    ci = arg - nlocals
+                    if 0 <= ci < len(f.cells):
+                        if f.cells[ci] is None:
+                            f.cells[ci] = [None]
+                        f.cells[ci][0] = val
+                else:
+                    fi = arg - nlocals - ncells
+                    if 0 <= fi < len(f.freevars) and f.freevars[fi] is not None:
+                        f.freevars[fi][0] = val
+
+            elif opname == 'DELETE_DEREF':
+                nlocals = f.code.co_nlocals
+                ncells = len(f.code.co_cellvars)
+                if arg < nlocals + ncells:
+                    ci = arg - nlocals
+                    if 0 <= ci < len(f.cells):
+                        if f.cells[ci] is None:
+                            f.cells[ci] = [_UNSET]
+                        else:
+                            f.cells[ci][0] = _UNSET
+                else:
+                    fi = arg - nlocals - ncells
+                    if 0 <= fi < len(f.freevars) and f.freevars[fi] is not None:
+                        f.freevars[fi][0] = _UNSET
+
+            elif opname == 'COPY_FREE_VARS':
+                # Already handled by Frame.__init__ using closure param.
+                # This is a hint that the first `arg` freevars come from closure.
+                pass
+
+            # ---------------------------------------------------------------
+            # Exception handling
+            # ---------------------------------------------------------------
+            elif opname == 'PUSH_EXC_INFO':
+                exc = stk.pop()
+                stk.append(None)   # previous exception placeholder
+                stk.append(exc)
+
+            elif opname == 'CHECK_EXC_MATCH':
+                exc_type = stk.pop()
+                exc = stk[-1]  # stays on stack
+                try:
+                    stk.append(isinstance(exc, exc_type))
                 except TypeError:
+                    stk.append(False)
+
+            elif opname == 'CHECK_EG_MATCH':
+                _eg_type = stk.pop()
+                _eg_exc = stk.pop()
+                if hasattr(_eg_exc, 'split'):
+                    _eg_match, _eg_rest = _eg_exc.split(_eg_type)
+                    if _eg_match is None:
+                        stk.append(_eg_exc)
+                        stk.append(None)
+                    else:
+                        stk.append(_eg_rest)
+                        stk.append(_eg_match)
+                elif isinstance(_eg_exc, BaseException) and isinstance(_eg_exc, _eg_type):
+                    stk.append(None)
+                    stk.append(_eg_exc)
+                else:
+                    stk.append(_eg_exc)
+                    stk.append(None)
+
+            elif opname == 'POP_EXCEPT':
+                if stk:
+                    stk.pop()
+
+            elif opname == 'RERAISE':
+                if stk and isinstance(stk[-1], BaseException):
+                    raise stk[-1]
+
+            elif opname == 'PREP_RERAISE_STAR':
+                _prs_exc = stk.pop()
+                _prs_orig = stk.pop()
+                if _prs_exc is None:
+                    stk.append(None)
+                else:
+                    stk.append(_prs_exc)
+
+            elif opname == 'RAISE_VARARGS':
+                if arg == 0:
+                    raise  # re-raise current
+                elif arg == 1:
+                    raise stk.pop()
+                elif arg == 2:
+                    cause = stk.pop()
+                    exc = stk.pop()
+                    raise exc from cause
+
+            elif opname == 'BEFORE_WITH':
+                mgr = stk[-1]
+                exit_method = mgr.__exit__
+                stk[-1] = exit_method
+                stk.append(mgr.__enter__())
+
+            elif opname == 'WITH_EXCEPT_START':
+                # Stack: [..., __exit__, lasti, prev_exc, exc]
+                exc = stk[-1]
+                exit_fn = stk[-4]
+                if isinstance(exc, BaseException):
+                    res = exit_fn(type(exc), exc, exc.__traceback__)
+                else:
+                    res = exit_fn(None, None, None)
+                stk.append(res)
+
+            # ---------------------------------------------------------------
+            # Import operations
+            # ---------------------------------------------------------------
+            elif opname == 'IMPORT_NAME':
+                fromlist = stk.pop()
+                level = stk.pop()
+                name = f.code.co_names[arg]
+                stk.append(__import__(name, f.globals, None, fromlist, level))
+
+            elif opname == 'IMPORT_FROM':
+                stk.append(getattr(stk[-1], f.code.co_names[arg]))
+
+            elif opname == 'IMPORT_STAR':
+                mod = stk.pop()
+                attrs = getattr(mod, '__all__', None) or [k for k in dir(mod) if not k.startswith('_')]
+                for k in attrs:
+                    f.globals[k] = getattr(mod, k)
+
+            # ---------------------------------------------------------------
+            # LOAD_BUILD_CLASS
+            # ---------------------------------------------------------------
+            elif opname == 'LOAD_BUILD_CLASS':
+                stk.append(builtins.get('__build_class__', __builtins__.__build_class__ if hasattr(__builtins__, '__build_class__') else None))
+
+            elif opname == 'LOAD_ASSERTION_ERROR':
+                stk.append(AssertionError)
+
+            elif opname == 'PRINT_EXPR':
+                _pval = stk.pop()
+                if _pval is not None:
+                    print(repr(_pval))
+
+            # ---------------------------------------------------------------
+            # Pattern matching (match/case)
+            # ---------------------------------------------------------------
+            elif opname == 'GET_LEN':
+                stk.append(len(stk[-1]))
+
+            elif opname == 'MATCH_MAPPING':
+                from collections.abc import Mapping as _Mapping
+                stk.append(isinstance(stk[-1], _Mapping))
+
+            elif opname == 'MATCH_SEQUENCE':
+                from collections.abc import Sequence as _Sequence
+                _ms_val = stk[-1]
+                stk.append(isinstance(_ms_val, _Sequence)
+                           and not isinstance(_ms_val, (str, bytes, bytearray)))
+
+            elif opname == 'MATCH_KEYS':
+                _mk_keys = stk[-1]
+                _mk_subj = stk[-2]
+                try:
+                    _mk_vals = []
+                    for _mk_k in _mk_keys:
+                        if _mk_k not in _mk_subj:
+                            stk.append(None)
+                            break
+                        _mk_vals.append(_mk_subj[_mk_k])
+                    else:
+                        stk.append(tuple(_mk_vals))
+                except (TypeError, KeyError):
+                    stk.append(None)
+
+            elif opname == 'MATCH_CLASS':
+                _mc_kw = stk.pop()
+                _mc_cls = stk.pop()
+                _mc_subj = stk.pop()
+                if not isinstance(_mc_subj, _mc_cls):
+                    stk.append(None)
+                else:
+                    _mc_args = getattr(_mc_cls, '__match_args__', ())
                     try:
-                        _lg_val = __builtins__.__dict__[_lg_name]
-                    except KeyError:
-                        _lg_val = None
-                except KeyError:
-                    _lg_val = None
-            if _lg_push_null:
-                const_stack.insert(0, None)
-            const_stack.insert(0, _lg_val)
+                        _mc_pos = []
+                        for _mc_i in range(arg):
+                            _mc_pos.append(getattr(_mc_subj, _mc_args[_mc_i]))
+                        _mc_kwv = []
+                        for _mc_an in _mc_kw:
+                            _mc_kwv.append(getattr(_mc_subj, _mc_an))
+                        stk.append(tuple(_mc_pos + _mc_kwv))
+                    except (AttributeError, IndexError):
+                        stk.append(None)
 
-            if __INTERNAL__DEBUG_LOG:
-                log.write('DEBUG => LOAD_GLOBAL %s => %s\n' % (_lg_name, _lg_val))
+            # ---------------------------------------------------------------
+            # KW_NAMES
+            # ---------------------------------------------------------------
+            elif opname == 'KW_NAMES':
+                f.kw_names = f.code.co_consts[arg]
 
-        elif opcode_value == 'STORE_FAST':
-            fast_dict[bytecode.co_varnames[arg]] = const_stack.pop(0)
+            # ---------------------------------------------------------------
+            # MAKE_FUNCTION
+            # ---------------------------------------------------------------
+            elif opname == 'MAKE_FUNCTION':
+                code_obj = stk.pop()
+                closure = stk.pop() if arg & 0x08 else None
+                ann = stk.pop() if arg & 0x04 else None
+                kwdefaults = stk.pop() if arg & 0x02 else None
+                defaults = stk.pop() if arg & 0x01 else ()
+                stk.append(VMFunction(code_obj, f.globals, defaults, closure,
+                                      kwdefaults, ann))
 
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => stored %s into %s\n" % (
-                    fast_dict[bytecode.co_varnames[arg]], bytecode.co_varnames[arg]))
+            # ---------------------------------------------------------------
+            # CALL (3.11 protocol)
+            # ---------------------------------------------------------------
+            elif opname == 'CALL':
+                argc = arg
+                # CPython 3.11 CALL protocol:
+                # Stack: [null_or_func, func_or_self, arg0, ..., argN-1]
+                # PEEK(argc+2) determines method vs non-method call.
+                # If PEEK(argc+2) is not _NULL → method call:
+                #   func = PEEK(argc+2), self = PEEK(argc+1), prepend to args
+                # If PEEK(argc+2) is _NULL → non-method call:
+                #   func = PEEK(argc+1), discard NULL
+                is_meth = False
+                if len(stk) >= argc + 2:
+                    if stk[-(argc + 2)] is not _NULL:
+                        is_meth = True
 
-        elif opcode_value == 'MAKE_CELL':
-            # Python 3.11: convert local at localsplus[arg] into a cell object.
-            # arg is the localsplus index; for cellvars that are also params,
-            # this equals the co_varnames index.
-            _mc_name = bytecode.co_varnames[arg] if arg < len(bytecode.co_varnames) else ''
-            _cells[arg] = [fast_dict.get(_mc_name)]
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => MAKE_CELL %d (%s)\n" % (arg, _mc_name))
+                if is_meth:
+                    args_list = list(stk[-argc:]) if argc > 0 else []
+                    if argc > 0:
+                        del stk[-argc:]
+                    first_arg = stk.pop()  # self / implicit first arg
+                    func = stk.pop()       # actual callable
+                    args_list = [first_arg] + args_list
+                else:
+                    args_list = list(stk[-argc:]) if argc > 0 else []
+                    if argc > 0:
+                        del stk[-argc:]
+                    func = stk.pop()       # callable
+                    if stk:
+                        stk.pop()          # _NULL sentinel
 
-        elif opcode_value == 'LOAD_CLOSURE':
-            # Push the cell object at localsplus[arg] (a cellvar).
-            const_stack.insert(0, _cells.get(arg, [None]))
-            if __INTERNAL__DEBUG_LOG:
-                _lc_name = bytecode.co_varnames[arg] if arg < len(bytecode.co_varnames) else str(arg)
-                log.write("DEBUG => LOAD_CLOSURE %d (%s)\n" % (arg, _lc_name))
+                # Split kwargs if KW_NAMES was set
+                if f.kw_names:
+                    nkw = len(f.kw_names)
+                    call_kwargs = dict(zip(f.kw_names, args_list[-nkw:]))
+                    args_list = args_list[:-nkw]
+                    f.kw_names = ()
+                else:
+                    call_kwargs = {}
 
-        elif opcode_value == 'LOAD_DEREF':
-            # arg < len(co_varnames): cellvar at _cells[arg]; else freevar.
-            _ld_n = len(bytecode.co_varnames)
-            if arg < _ld_n:
-                _ld_cell = _cells.get(arg, [None])
+                if isinstance(func, VMFunction):
+                    new_frame = Frame(func.code, func.globals, builtins,
+                                      func.closure)
+                    _bind_args(new_frame, func, args_list, call_kwargs)
+                    frames.append(new_frame)
+                    continue
+                else:
+                    # Native callable
+                    # Special handling for __build_class__ with VMFunction body
+                    if (func is builtins.get('__build_class__') and
+                            args_list and isinstance(args_list[0], VMFunction)):
+                        vmf = args_list[0]
+                        if vmf.closure:
+                            _cls_closure = tuple(
+                                (lambda _v: (lambda: _v).__closure__[0])(
+                                    c[0] if c else None) for c in vmf.closure)
+                            args_list[0] = _types_mod.FunctionType(
+                                vmf.code, vmf.globals, vmf.name, None,
+                                _cls_closure)
+                        else:
+                            args_list[0] = _types_mod.FunctionType(
+                                vmf.code, vmf.globals)
+                    stk.append(func(*args_list, **call_kwargs))
+
+            # ---------------------------------------------------------------
+            # CALL_FUNCTION (legacy, kept for compatibility)
+            # ---------------------------------------------------------------
+            elif opname == 'CALL_FUNCTION':
+                argc_pos = arg & 0xff
+                argc_kw = (arg >> 8) & 0xff
+                kwargs = {}
+                for _ in range(argc_kw):
+                    val = stk.pop()
+                    key = stk.pop()
+                    kwargs[key] = val
+                args_list = stk[-argc_pos:] if argc_pos > 0 else []
+                if argc_pos > 0:
+                    del stk[-argc_pos:]
+                func = stk.pop()
+
+                if isinstance(func, VMFunction):
+                    new_frame = Frame(func.code, func.globals, builtins,
+                                      func.closure)
+                    _bind_args(new_frame, func, args_list, kwargs)
+                    frames.append(new_frame)
+                    continue
+                else:
+                    stk.append(func(*args_list, **kwargs))
+
+            # ---------------------------------------------------------------
+            # CALL_FUNCTION_EX
+            # ---------------------------------------------------------------
+            elif opname == 'CALL_FUNCTION_EX':
+                call_kwargs = stk.pop() if (arg & 0x01) else {}
+                call_args = stk.pop()
+                func = stk.pop()
+                # Pop NULL sentinel if present
+                if stk and stk[-1] is _NULL:
+                    stk.pop()
+                if isinstance(func, VMFunction):
+                    new_frame = Frame(func.code, func.globals, builtins,
+                                      func.closure)
+                    _bind_args(new_frame, func, tuple(call_args), call_kwargs)
+                    frames.append(new_frame)
+                    continue
+                else:
+                    stk.append(func(*call_args, **call_kwargs))
+
+            # ---------------------------------------------------------------
+            # RETURN_VALUE
+            # ---------------------------------------------------------------
+            elif opname == 'RETURN_VALUE':
+                retval = stk.pop() if stk else None
+                frames.pop()
+                if frames:
+                    frames[-1].stack.append(retval)
+                else:
+                    final_retval = retval
+                continue
+
+            # ---------------------------------------------------------------
+            # Unknown opcode
+            # ---------------------------------------------------------------
             else:
-                _ld_fi = arg - _ld_n
-                _ld_cell = _free_cells[_ld_fi] if _ld_fi < len(_free_cells) else [None]
-            const_stack.insert(0, _ld_cell[0] if _ld_cell is not None else None)
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => LOAD_DEREF %d => %r\n" % (arg, const_stack[0]))
-
-        elif opcode_value == 'STORE_DEREF':
-            _sd_val = const_stack.pop(0)
-            _sd_n = len(bytecode.co_varnames)
-            if arg < _sd_n:
-                if arg not in _cells:
-                    _cells[arg] = [None]
-                _cells[arg][0] = _sd_val
-            else:
-                _sd_fi = arg - _sd_n
-                if _sd_fi < len(_free_cells) and _free_cells[_sd_fi] is not None:
-                    _free_cells[_sd_fi][0] = _sd_val
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => STORE_DEREF %d\n" % arg)
-
-        elif opcode_value == 'COPY_FREE_VARS':
-            # Populate _free_cells[0..arg-1] from fast_dict['__closure__'].
-            _cfv_closure = fast_dict.get('__closure__')
-            if _cfv_closure is not None:
-                _cfv_i = 0
-                while _cfv_i < arg and _cfv_i < len(_cfv_closure):
-                    _free_cells[_cfv_i] = _cfv_closure[_cfv_i]
-                    _cfv_i += 1
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => COPY_FREE_VARS %d\n" % arg)
-
-        elif opcode_value == 'SWAP':
-            # SWAP(i): swap TOS (index 0) with stack[i-1] (1-indexed from TOS).
-            if arg > 1 and len(const_stack) >= arg:
-                const_stack[0], const_stack[arg - 1] = const_stack[arg - 1], const_stack[0]
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => SWAP %d\n" % arg)
-
-        elif opcode_value == 'STORE_NAME':
-            name_dict[arg] = const_stack.pop(0)
-            _sn_val = name_dict[arg]
-            # When the inner VM stores a wrapped py2vm (an _mf_callable whose
-            # inner code object is py2vm's function body, identified by co_name
-            # and co_firstlineno), substitute the native py2vm function.  This
-            # prevents infinite re-interpretation when the inner buildcode()
-            # calls py2vm() via LOAD_GLOBAL.
-            if (bytecode.co_names[arg] == 'py2vm'
-                    and hasattr(_sn_val, '__closure__') and _sn_val.__closure__):
-                try:
-                    _fv_sn = list(_sn_val.__code__.co_freevars)
-                    _co_sn = _sn_val.__closure__[_fv_sn.index('_co')].cell_contents
-                    if (_co_sn.co_name == 'py2vm'
-                            and _co_sn.co_firstlineno == py2vm.__code__.co_firstlineno):
-                        _sn_val = py2vm
-                        name_dict[arg] = py2vm
-                except Exception:
-                    pass
-            globals_frame[bytecode.co_names[arg]] = _sn_val
-            if bytecode.co_names[arg] == '__INTERNAL__DEBUG_LOG':
-                __INTERNAL__DEBUG_LOG = name_dict[arg]
-
-                if __INTERNAL__DEBUG_LOG:
-                    log.write(
-                        "DEBUG => tripped internal debugger: verbose output\n")
-
-            elif bytecode.co_names[arg] == '__INTERNAL__DEBUG_LOG_CONST':
-                __INTERNAL__DEBUG_LOG_CONST = name_dict[arg]
-
-                if __INTERNAL__DEBUG_LOG:
-                    log.write(
-                        "DEBUG => tripped internal debugger: const print\n")
-
-            elif bytecode.co_names[arg] == '__INTERNAL__DEBUG_LOG_VAR':
-                __INTERNAL__DEBUG_LOG_VAR = name_dict[arg]
-
-                if __INTERNAL__DEBUG_LOG:
-                    log.write(
-                        "DEBUG => tripped internal debugger: name dict print\n")
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => set value of var %s to %s\n" %
-                          (bytecode.co_names[arg], name_dict[arg]))
-
-        elif opcode_value == 'DELETE_NAME':
-            del name_dict[arg]
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => deleted name dict entry %s\n" % (arg))
-
-        elif opcode_value == 'STORE_GLOBAL':
-            globals_frame[bytecode.co_names[arg]] = const_stack.pop(0)
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => STORE_GLOBAL %s\n" % bytecode.co_names[arg])
-
-        elif opcode_value == 'UNARY_POSITIVE':
-            const_stack.insert(0, +(const_stack[0]))
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => set top of stack to +(tos)\n")
-
-        elif opcode_value == 'UNARY_NEGATIVE':
-            const_stack.insert(0, -(const_stack[0]))
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => set top of stack to -(tos)\n")
-
-        elif opcode_value == 'UNARY_NOT':
-            const_stack.insert(0, not const_stack[0])
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => set top of stack to not tos\n")
-
-        elif opcode_value == 'UNARY_CONVERT':
-            const_stack.insert(0, const_stack[0].__repr__())
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => added repr(tos) to top of stack\n")
-
-        elif opcode_value == 'UNARY_INVERT':
-            const_stack.insert(0, ~const_stack[0])
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => added ~tos to top of stack\n")
-
-        elif opcode_value == 'GET_ITER':
-            const_stack[0] = const_stack[0].__iter__()
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => replaced tos with iter(tos)\n")
-
-        elif opcode_value == 'BINARY_POWER':
-            # We're supposed to remove tos/tos1 on binary_calls
-            math0 = const_stack.pop(0)
-            math1 = const_stack.pop(0)
-            const_stack.insert(0, math1 ** math0)
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => got power of %s and %s\n" % (math1, math0))
-
-        elif opcode_value == 'BINARY_MULTIPLY':
-            math0 = const_stack.pop(0)
-            math1 = const_stack.pop(0)
-            const_stack.insert(0, math1 * math0)
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => multiplied %s with %s\n" % (math0, math1))
-
-        elif opcode_value == 'BINARY_DIVIDE':
-            math0 = const_stack.pop(0)
-            math1 = const_stack.pop(0)
-            const_stack.insert(0, math1 / math0)
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => divided %s with %s\n" % (math0, math1))
-
-        elif opcode_value == 'BINARY_FLOOR_DIVIDE':
-            math0 = const_stack.pop(0)
-            math1 = const_stack.pop(0)
-            const_stack.insert(0, math1 // math0)
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => divided %s with %s\n" % (math0, math1))
-
-        elif opcode_value == 'BINARY_MODULO':
-            math0 = const_stack.pop(0)
-            math1 = const_stack.pop(0)
-            const_stack.insert(0, math1 % math0)
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => got mod of %s and %s\n" % (math0, math1))
-
-        elif opcode_value == 'BINARY_TRUE_DIVIDE':
-            math0 = const_stack.pop(0)
-            math1 = const_stack.pop(0)
-            const_stack.insert(0, math1 / math0)
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => divided %s with %s\n" % (math0, math1))
-
-        elif opcode_value == 'BINARY_ADD':
-            math0 = const_stack.pop(0)
-            math1 = const_stack.pop(0)
-            const_stack.insert(0, math1 + math0)
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => added %s with %s\n" % (math0, math1))
-
-        elif opcode_value == 'BINARY_SUBTRACT':
-            math0 = const_stack.pop(0)
-            math1 = const_stack.pop(0)
-            const_stack.insert(0, math1 - math0)
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => subtracted %s from %s\n" % (math1, math0))
-
-        elif opcode_value == 'BINARY_SUBSCR':
-            math0 = const_stack.pop(0)
-            math1 = const_stack.pop(0)
-            try:
-                const_stack.insert(0, math1[math0])
-                if __INTERNAL__DEBUG_LOG:
-                    log.write("DEBUG => set tos to %s[%s]\n" % (math1, math0))
-            except Exception as _subscr_exc:
-                _subscr_handled = False
-                for _et_s, _et_e, _et_t, _et_d in _exc_table:
-                    if _et_s <= _cur_offset < _et_e:
-                        while len(const_stack) > _et_d:
-                            const_stack.pop(0)
-                        const_stack.insert(0, _subscr_exc)
-                        i = offset_to_index.get(_et_t, i) - 1
-                        _subscr_handled = True
-                        break
-                if not _subscr_handled:
-                    log.write("ERROR => BINARY_SUBSCR failed: %s\n" % _subscr_exc)
-                    const_stack.insert(0, None)
-
-        elif opcode_value == 'BINARY_LSHIFT':
-            math0 = const_stack.pop(0).__int__()
-            math1 = const_stack.pop(0).__int__()
-            const_stack.insert(0, math1 << math0)
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => shifted %s left %s\n" % (math1, math0))
-
-        elif opcode_value == 'BINARY_RSHIFT':
-            math0 = const_stack.pop(0).__int__()
-            math1 = const_stack.pop(0).__int__()
-            const_stack.insert(0, math1 >> math0)
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => shifted %s right %s\n" % (math1, math0))
-
-        elif opcode_value == 'BINARY_AND':
-            math0 = const_stack.pop(0).__int__()
-            math1 = const_stack.pop(0).__int__()
-            const_stack.insert(0, math1 & math0)
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => %s AND %s\n" % (math1, math0))
-
-        elif opcode_value == 'BINARY_XOR':
-            math0 = const_stack.pop(0).__int__()
-            math1 = const_stack.pop(0).__int__()
-            const_stack.insert(0, math1 ^ math0)
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => %s XOR %s\n" % (math1, math0))
-
-        elif opcode_value == 'BINARY_OR':
-            math0 = const_stack.pop(0).__int__()
-            math1 = const_stack.pop(0).__int__()
-            const_stack.insert(0, math1 | math0)
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => %s OR %s\n" % (math1, math0))
-
-        elif opcode_value == 'BINARY_OP':
-            # Python 3.11: unified binary/inplace op; arg selects operation.
-            # Regular: 0=+  1=&  2=//  3=<<  5=*  6=%  7=|  8=**  9=>>  10=-  11=/  12=^
-            # Inplace: add 13 to regular arg (13=+=, 14=&=, ..., 23=-=, etc.)
-            _bo_arg = arg if arg < 13 else arg - 13
-            math0 = const_stack.pop(0)
-            math1 = const_stack.pop(0)
-            if _bo_arg == 0:    result = math1 + math0
-            elif _bo_arg == 1:  result = math1 & math0
-            elif _bo_arg == 2:  result = math1 // math0
-            elif _bo_arg == 3:  result = math1 << math0
-            elif _bo_arg == 5:  result = math1 * math0
-            elif _bo_arg == 6:  result = math1 % math0
-            elif _bo_arg == 7:  result = math1 | math0
-            elif _bo_arg == 8:  result = math1 ** math0
-            elif _bo_arg == 9:  result = math1 >> math0
-            elif _bo_arg == 10: result = math1 - math0
-            elif _bo_arg == 11: result = math1 / math0
-            elif _bo_arg == 12: result = math1 ^ math0
-            else:               result = None
-            const_stack.insert(0, result)
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => BINARY_OP[%d] %s op %s => %s\n" % (arg, math1, math0, result))
-
-        elif opcode_value == 'LOAD_BUILD_CLASS':
-            # Python 3.11: push __build_class__ builtin for class definitions
-            try:
-                _bld = __builtins__['__build_class__']
-            except TypeError:
-                _bld = __builtins__.__build_class__
-            const_stack.insert(0, _bld)
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => LOAD_BUILD_CLASS\n")
-
-        elif opcode_value == 'COMPARE_OP':
-            math0 = const_stack.pop(0)
-            math1 = const_stack.pop(0)
-            op_name = CMP_OP[arg]
-            if op_name == '<':
-                result = math1 < math0
-            elif op_name == '<=':
-                result = math1 <= math0
-            elif op_name == '==':
-                result = math1 == math0
-            elif op_name == '!=':
-                result = math1 != math0
-            elif op_name == '>':
-                result = math1 > math0
-            elif op_name == '>=':
-                result = math1 >= math0
-            elif op_name == 'in':
-                result = math1 in math0
-            elif op_name == 'not in':
-                result = math1 not in math0
-            elif op_name == 'is':
-                result = math1 is math0
-            elif op_name == 'is not':
-                result = math1 is not math0
-            else:
-                result = False
-            const_stack.insert(0, result)
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => compared %s %s %s => %s\n" % (math1, op_name, math0, result))
-
-        elif opcode_value == 'POP_JUMP_IF_FALSE':
-            tos = const_stack.pop(0)
-            if not tos:
-                i = offset_to_index[arg] - 1
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => POP_JUMP_IF_FALSE: tos=%s target=%s\n" % (tos, arg))
-
-        elif opcode_value == 'POP_JUMP_IF_TRUE':
-            tos = const_stack.pop(0)
-            if tos:
-                i = offset_to_index[arg] - 1
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => POP_JUMP_IF_TRUE: tos=%s target=%s\n" % (tos, arg))
-
-        elif opcode_value == 'JUMP_IF_TRUE_OR_POP':
-            if const_stack[0]:
-                i = offset_to_index[arg] - 1
-            else:
-                del const_stack[0]
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => JUMP_IF_TRUE_OR_POP: target=%s\n" % arg)
-
-        elif opcode_value == 'JUMP_IF_FALSE_OR_POP':
-            if not const_stack[0]:
-                i = offset_to_index[arg] - 1
-            else:
-                del const_stack[0]
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => JUMP_IF_FALSE_OR_POP: target=%s\n" % arg)
-
-        elif opcode_value == 'JUMP_FORWARD':
-            i = offset_to_index[arg] - 1
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => jumped forward to %s\n" % (arg))
-
-        elif opcode_value == 'JUMP_ABSOLUTE':
-            i = offset_to_index[arg] - 1
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => jumped to %s\n" % (arg))
-
-        elif opcode_value == 'JUMP_BACKWARD':
-            # Python 3.11: backward loop jump (replaces JUMP_ABSOLUTE for loops)
-            i = offset_to_index[arg] - 1
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => jumped backward to %s\n" % (arg))
-
-        elif opcode_value == 'POP_JUMP_FORWARD_IF_FALSE':
-            # Python 3.11: forward conditional jump if false
-            tos = const_stack.pop(0)
-            if not tos:
-                i = offset_to_index[arg] - 1
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => POP_JUMP_FORWARD_IF_FALSE: tos=%s target=%s\n" % (tos, arg))
-
-        elif opcode_value == 'POP_JUMP_FORWARD_IF_TRUE':
-            # Python 3.11: forward conditional jump if true
-            tos = const_stack.pop(0)
-            if tos:
-                i = offset_to_index[arg] - 1
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => POP_JUMP_FORWARD_IF_TRUE: tos=%s target=%s\n" % (tos, arg))
-
-        elif opcode_value == 'SETUP_LOOP':
-            block_stack.append(('loop', arg))
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => setup loop, exit at byte %s\n" % arg)
-
-        elif opcode_value == 'POP_BLOCK':
-            if block_stack:
-                block_stack.pop()
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => popped block\n")
-
-        elif opcode_value == 'BREAK_LOOP':
-            if block_stack:
-                _, exit_offset = block_stack.pop()
-                i = offset_to_index[exit_offset] - 1
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => break loop\n")
-
-        elif opcode_value == 'FOR_ITER':
-            try:
-                try:
-                    val = const_stack[0].__next__()  # Python 3
-                except AttributeError:
-                    val = const_stack[0].next()  # Python 2
-                const_stack.insert(0, val)
-            except StopIteration:
-                const_stack.pop(0)
-                i = offset_to_index[arg] - 1
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => FOR_ITER\n")
-
-        elif opcode_value == 'PRINT_ITEM':
-            log.write(const_stack.pop(0).__str__())
-
-        elif opcode_value == 'PRINT_NEWLINE':
-            log.write('\n')
-
-        elif opcode_value == 'LOAD_METHOD':
-            # Python 3.11: load a method; push (attr, obj) so CALL can pop self
-            _lm_obj = const_stack.pop(0)
-            _lm_attr = _lm_obj.__getattribute__(bytecode.co_names[arg])
-            const_stack.insert(0, _lm_attr)  # method at TOS
-            const_stack.insert(1, _lm_obj)   # self below method (CALL will pop it)
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => LOAD_METHOD %s\n" % bytecode.co_names[arg])
-
-        elif opcode_value == 'BUILD_MAP':
-            # arg=0: push empty dict (size hint).
-            # arg>0: pop 2*arg items (val0, key0, val1, key1, ...) and build dict.
-            if arg == 0:
-                const_stack.insert(0, {})
-            else:
-                _bm_dict = {}
-                _bm_count = arg
-                while _bm_count > 0:
-                    _bm_val = const_stack.pop(0)
-                    _bm_key = const_stack.pop(0)
-                    _bm_dict[_bm_key] = _bm_val
-                    _bm_count -= 1
-                const_stack.insert(0, _bm_dict)
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => BUILD_MAP %d\n" % arg)
-
-        elif opcode_value == 'MAP_ADD':
-            # MAP_ADD i: pop TOS (value) and TOS1 (key), add to dict at stack[i-1]
-            _ma_value = const_stack.pop(0)
-            _ma_key = const_stack.pop(0)
-            const_stack[arg - 1][_ma_key] = _ma_value
-
-        elif opcode_value == 'BUILD_CONST_KEY_MAP':
-            # Stack: TOS=keys_tuple, then N values (arg=N). Build dict.
-            _bck_keys = const_stack.pop(0)
-            _bck_vals = []
-            _bck_count = arg
-            while _bck_count > 0:
-                _bck_vals.insert(0, const_stack.pop(0))
-                _bck_count -= 1
-            _bck_result = {}
-            _bck_idx = 0
-            for _bck_k in _bck_keys:
-                _bck_result[_bck_k] = _bck_vals[_bck_idx]
-                _bck_idx += 1
-            const_stack.insert(0, _bck_result)
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => BUILD_CONST_KEY_MAP %d\n" % arg)
-
-        elif opcode_value in ('DICT_UPDATE', 'DICT_MERGE'):
-            # DICT_UPDATE/DICT_MERGE i: pop TOS (source), merge into dict at stack[i-1]
-            _du_other = const_stack.pop(0)
-            _du_dst = const_stack[arg - 1] if len(const_stack) >= arg else None
-            if isinstance(_du_dst, dict):
-                _du_dst.update(_du_other)
-            else:
-                log.write("ERROR => %s: dst at [%d] is %r, src=%r, stack depth=%d\n" % (
-                    opcode_value, arg - 1, _du_dst, _du_other, len(const_stack)))
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => %s\n" % opcode_value)
-
-        elif opcode_value == 'BUILD_LIST':
-            # arg items from stack (0 = empty list)
-            _bl_items = []
-            _bl_count = arg
-            while _bl_count > 0:
-                _bl_items.insert(0, const_stack.pop(0))
-                _bl_count -= 1
-            const_stack.insert(0, _bl_items)
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => BUILD_LIST %d\n" % arg)
-
-        elif opcode_value == 'BUILD_TUPLE':
-            # arg items from stack (0 = empty tuple)
-            _bt_items = []
-            _bt_count = arg
-            while _bt_count > 0:
-                _bt_items.insert(0, const_stack.pop(0))
-                _bt_count -= 1
-            const_stack.insert(0, tuple(_bt_items))
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => BUILD_TUPLE %d\n" % arg)
-
-        elif opcode_value == 'UNPACK_SEQUENCE':
-            # Pop TOS sequence, push its items right-to-left so TOS is item 0.
-            _us_seq = list(const_stack.pop(0))
-            _us_i = len(_us_seq) - 1
-            while _us_i >= 0:
-                const_stack.insert(0, _us_seq[_us_i])
-                _us_i -= 1
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => UNPACK_SEQUENCE %d\n" % arg)
-
-        elif opcode_value == 'IS_OP':
-            # IS_OP(invert): TOS1 is TOS → push bool; invert=1 means "is not".
-            _io_b = const_stack.pop(0)
-            _io_a = const_stack.pop(0)
-            _io_result = (_io_a is not _io_b) if arg else (_io_a is _io_b)
-            const_stack.insert(0, _io_result)
-
-        elif opcode_value == 'CONTAINS_OP':
-            # CONTAINS_OP(invert): TOS1 in TOS → push bool; invert=1 means "not in".
-            _co_container = const_stack.pop(0)
-            _co_item = const_stack.pop(0)
-            try:
-                _co_result = (_co_item not in _co_container) if arg else (_co_item in _co_container)
-            except TypeError:
-                _co_result = False
-            const_stack.insert(0, _co_result)
-
-        elif opcode_value == 'STORE_SUBSCR':
-            # TOS1[TOS] = TOS2; pops all three.
-            _ss_key = const_stack.pop(0)
-            _ss_obj = const_stack.pop(0)
-            _ss_val = const_stack.pop(0)
-            _ss_obj[_ss_key] = _ss_val
-
-        elif opcode_value == 'STORE_ATTR':
-            # TOS.name = TOS1; pops both.
-            _sa_obj = const_stack.pop(0)
-            _sa_val = const_stack.pop(0)
-            setattr(_sa_obj, bytecode.co_names[arg], _sa_val)
-
-        elif opcode_value == 'BUILD_SLICE':
-            # arg=2: pop stop, start → push slice(start, stop)
-            # arg=3: pop step, stop, start → push slice(start, stop, step)
-            if arg == 3:
-                _bs_step = const_stack.pop(0)
-                _bs_stop = const_stack.pop(0)
-                _bs_start = const_stack.pop(0)
-                const_stack.insert(0, slice(_bs_start, _bs_stop, _bs_step))
-            else:
-                _bs_stop = const_stack.pop(0)
-                _bs_start = const_stack.pop(0)
-                const_stack.insert(0, slice(_bs_start, _bs_stop))
-
-        elif opcode_value == 'DELETE_SUBSCR':
-            # del TOS1[TOS]; pops both.
-            _ds_key = const_stack.pop(0)
-            _ds_obj = const_stack.pop(0)
-            del _ds_obj[_ds_key]
-
-        elif opcode_value == 'DELETE_FAST':
-            _df_name = bytecode.co_varnames[arg]
-            fast_dict.pop(_df_name, None)
-
-        elif opcode_value == 'KW_NAMES':
-            # Store keyword argument names for the next CALL opcode.
-            _kw_names = bytecode.co_consts[arg]
-
-        elif opcode_value == 'FORMAT_VALUE':
-            # f-string value slot: arg encodes conversion + whether format spec present.
-            _fv_have_spec = bool(arg & 0x04)
-            _fv_conv = arg & 0x03
-            _fv_spec = const_stack.pop(0) if _fv_have_spec else ''
-            _fv_val = const_stack.pop(0)
-            if _fv_conv == 1:
-                _fv_val = str(_fv_val)
-            elif _fv_conv == 2:
-                _fv_val = repr(_fv_val)
-            elif _fv_conv == 3:
-                _fv_val = ascii(_fv_val)
-            const_stack.insert(0, format(_fv_val, _fv_spec))
-
-        elif opcode_value == 'BUILD_STRING':
-            # Concatenate arg strings from the stack.
-            _bstr_parts = []
-            _bstr_n = arg
-            while _bstr_n > 0:
-                _bstr_parts.insert(0, const_stack.pop(0))
-                _bstr_n -= 1
-            const_stack.insert(0, ''.join(_bstr_parts))
-
-        elif opcode_value == 'CALL_FUNCTION_EX':
-            # CALL_FUNCTION_EX(flags): call func(*args[, **kwargs]).
-            _cfex_kwargs = const_stack.pop(0) if (arg & 0x01) else {}
-            _cfex_args = const_stack.pop(0)
-            _cfex_func = const_stack.pop(0)
-            if const_stack and const_stack[0] is None:
-                const_stack.pop(0)  # pop NULL sentinel
-            try:
-                const_stack.insert(0, _cfex_func(*_cfex_args, **_cfex_kwargs))
-            except Exception as _cfex_exc:
-                log.write("ERROR => CALL_FUNCTION_EX failed: %s\n" % _cfex_exc)
-                const_stack.insert(0, None)
-
-
-        elif opcode_value == 'POP_JUMP_BACKWARD_IF_TRUE':
-            tos = const_stack.pop(0)
-            if tos:
-                i = offset_to_index[arg] - 1
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => POP_JUMP_BACKWARD_IF_TRUE: tos=%s target=%s\n" % (tos, arg))
-
-        elif opcode_value == 'POP_JUMP_BACKWARD_IF_FALSE':
-            tos = const_stack.pop(0)
-            if not tos:
-                i = offset_to_index[arg] - 1
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => POP_JUMP_BACKWARD_IF_FALSE: tos=%s target=%s\n" % (tos, arg))
-
-        elif opcode_value == 'POP_JUMP_FORWARD_IF_NONE':
-            tos = const_stack.pop(0)
-            if tos is None:
-                i = offset_to_index[arg] - 1
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => POP_JUMP_FORWARD_IF_NONE: tos=%s target=%s\n" % (tos, arg))
-
-        elif opcode_value == 'POP_JUMP_FORWARD_IF_NOT_NONE':
-            tos = const_stack.pop(0)
-            if tos is not None:
-                i = offset_to_index[arg] - 1
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => POP_JUMP_FORWARD_IF_NOT_NONE: tos=%s target=%s\n" % (tos, arg))
-
-        elif opcode_value == 'PUSH_EXC_INFO':
-            # Pushes the caught exception; saves previous exception state (we use None).
-            _pei_exc = const_stack.pop(0)
-            const_stack.insert(0, None)      # placeholder for previous exception
-            const_stack.insert(0, _pei_exc)  # caught exception back at TOS
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => PUSH_EXC_INFO\n")
-
-        elif opcode_value == 'CHECK_EXC_MATCH':
-            # Pops TOS (exception type), checks TOS1 (exception), pushes bool.
-            _cem_types = const_stack.pop(0)
-            _cem_exc = const_stack[0]  # stays on stack
-            try:
-                _cem_result = isinstance(_cem_exc, _cem_types)
-            except TypeError:
-                _cem_result = False
-            const_stack.insert(0, _cem_result)
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => CHECK_EXC_MATCH: %s\n" % _cem_result)
-
-        elif opcode_value == 'POP_EXCEPT':
-            # Pops the saved previous-exception placeholder pushed by PUSH_EXC_INFO.
-            if const_stack:
-                const_stack.pop(0)
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => POP_EXCEPT\n")
-
-        elif opcode_value == 'COPY':
-            # COPY(i): push a copy of STACK[-i] (1-indexed) to TOS.
-            if arg > 0 and arg <= len(const_stack):
-                const_stack.insert(0, const_stack[arg - 1])
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => COPY %d\n" % arg)
-
-        elif opcode_value == 'RERAISE':
-            # Re-raise the current exception from TOS (if it is one).
-            if const_stack and isinstance(const_stack[0], BaseException):
-                raise const_stack[0]
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => RERAISE\n")
-
-        elif opcode_value == 'LOAD_ATTR':
-            math0 = const_stack.pop(0)
-            try:
-                const_stack.insert(0, getattr(math0, bytecode.co_names[arg]))
-            except Exception as _la_exc:
-                _la_handled = False
-                for _et_s, _et_e, _et_t, _et_d in _exc_table:
-                    if _et_s <= _cur_offset < _et_e:
-                        while len(const_stack) > _et_d:
-                            const_stack.pop(0)
-                        const_stack.insert(0, _la_exc)
-                        i = offset_to_index.get(_et_t, i) - 1
-                        _la_handled = True
-                        break
-                if not _la_handled:
-                    log.write("ERROR => LOAD_ATTR %s failed: %s\n" % (bytecode.co_names[arg], _la_exc))
-                    const_stack.insert(0, None)
-
-        elif opcode_value == 'MAKE_FUNCTION':
-            # Stack layout at MAKE_FUNCTION (from TOS down):
-            #   TOS:   code object          (pushed last)
-            #   TOS-1: closure tuple        (if bit 0x08)
-            #   TOS-2: annotations dict     (if bit 0x04)
-            #   TOS-3: kwonly defaults dict (if bit 0x02)
-            #   TOS-4: positional defaults  (if bit 0x01, pushed first = deepest)
-            _mf_code = const_stack.pop(0)   # code object is always at TOS
-            _mf_closure = const_stack.pop(0) if arg & 0x08 else None
-            if arg & 0x04: const_stack.pop(0)   # annotations dict
-            if arg & 0x02: const_stack.pop(0)   # kwonly defaults dict
-            # Capture positional defaults so the callable can apply them correctly.
-            _mf_defs = const_stack.pop(0) if arg & 0x01 else ()
-            const_stack.insert(0, _mf_make(_mf_code, globals_frame, _mf_defs, _mf_closure))
-
-        elif opcode_value == 'CALL_FUNCTION':
-            argc = arg & 0xff
-            kwargc = (arg >> 8) & 0xff
-
-            # Collect keyword arguments — while countdown avoids xrange/range
-            kwargs = {}
-            count = kwargc
-            while count > 0:
-                val = const_stack.pop(0)
-                key = const_stack.pop(0)
-                kwargs[key] = val
-                count -= 1
-
-            # Collect positional arguments in call order
-            args_list = []
-            count = argc
-            while count > 0:
-                args_list.insert(0, const_stack.pop(0))
-                count -= 1
-
-            func = const_stack.pop(0)
-
-            # Dispatch: probe for co_code to detect VM-interpreted code objects;
-            # fall back to native callable otherwise.  try/except replaces hasattr.
-            try:
-                func.co_code  # probe — only code objects have this attribute
-                fl = {}
-                idx = 0
-                for val in args_list:
-                    try:
-                        fl[func.co_varnames[idx]] = val
-                    except IndexError:
-                        pass
-                    idx += 1
-                result_stack, log = py2vm(func, [], log, fast_locals=fl, globals_frame=globals_frame)
-                const_stack.insert(0, result_stack[0] if result_stack else None)
-
-                if __INTERNAL__DEBUG_LOG:
-                    log.write("DEBUG => called function %s(%s)\n" % (func.co_name, args_list))
-
-            except AttributeError:
-                try:
-                    if func.__name__ == '__build_class__' and args_list:
-                        _cb = args_list[0]
-                        try:
-                            # Locate _co and _gf by name in co_freevars to be
-                            # robust against future changes to _mf_make's params.
-                            _fv = list(_cb.__code__.co_freevars)
-                            _cb_code = _cb.__closure__[_fv.index('_co')].cell_contents
-                            _cb_gf = _cb.__closure__[_fv.index('_gf')].cell_contents
-                            args_list[0] = py2vm.__class__(_cb_code, _cb_gf)
-                        except Exception:
-                            pass
-                except AttributeError:
-                    pass
-                # If func is an _mf_callable wrapping py2vm's own code object,
-                # substitute native py2vm to prevent infinite re-interpretation
-                # when the inner VM calls py2vm() (e.g. from buildcode).
-                if hasattr(func, '__closure__') and func.__closure__:
-                    try:
-                        _fv2 = list(func.__code__.co_freevars)
-                        _inner_co2 = func.__closure__[_fv2.index('_co')].cell_contents
-                        if (_inner_co2.co_name == 'py2vm'
-                                and _inner_co2.co_firstlineno == py2vm.__code__.co_firstlineno):
-                            func = py2vm
-                    except Exception:
-                        pass
-                try:
-                    result = func(*args_list, **kwargs)
-                    const_stack.insert(0, result)
-                except Exception as e:
-                    log.write("ERROR => could not call %s: %s\n" % (func, e))
-                    const_stack.insert(0, None)
-
-        elif opcode_value == 'CALL':
-            # Python 3.11 CALL opcode: like CALL_FUNCTION but stack also has a
-            # NULL sentinel below the callable (pushed by PUSH_NULL).
-            # KW_NAMES may have provided keyword-argument names for this call.
-            argc = arg  # total argument count (positional + keyword)
-
-            args_list = []
-            count = argc
-            while count > 0:
-                args_list.insert(0, const_stack.pop(0))
-                count -= 1
-
-            func = const_stack.pop(0)
-            # Pop the NULL sentinel pushed by PUSH_NULL (or self for method calls)
-            if const_stack:
-                const_stack.pop(0)
-
-            # Split off keyword arguments if KW_NAMES was set.
-            if _kw_names:
-                _call_nkw = len(_kw_names)
-                _call_kwargs = dict(zip(_kw_names, args_list[-_call_nkw:]))
-                args_list = args_list[:-_call_nkw]
-                _kw_names = ()
-            else:
-                _call_kwargs = {}
-
-            try:
-                func.co_code  # probe for VM code object
-                fl = {}
-                idx = 0
-                for val in args_list:
-                    try:
-                        fl[func.co_varnames[idx]] = val
-                    except IndexError:
-                        pass
-                    idx += 1
-                result_stack, log = py2vm(func, [], log, fast_locals=fl, globals_frame=globals_frame)
-                const_stack.insert(0, result_stack[0] if result_stack else None)
-
-                if __INTERNAL__DEBUG_LOG:
-                    log.write("DEBUG => CALL code object %s(%s)\n" % (func.co_name, args_list))
-
-            except AttributeError:
-                # Before calling natively, if this is __build_class__ unwrap any
-                # _mf_callable wrapper in the first argument so the class body
-                # runs as a real FunctionType (needed for proper class namespace).
-                try:
-                    if func.__name__ == '__build_class__' and args_list:
-                        _cb = args_list[0]
-                        try:
-                            # Look up _co and _gf by name in co_freevars.
-                            _fv = list(_cb.__code__.co_freevars)
-                            _cb_code = _cb.__closure__[_fv.index('_co')].cell_contents
-                            _cb_gf = _cb.__closure__[_fv.index('_gf')].cell_contents
-                            args_list[0] = py2vm.__class__(_cb_code, _cb_gf)
-                        except Exception:
-                            pass
-                except AttributeError:
-                    pass
-                # If func is an _mf_callable wrapping py2vm's own code object,
-                # substitute native py2vm to prevent infinite re-interpretation
-                # when the inner VM calls py2vm() (e.g. from buildcode).
-                if hasattr(func, '__closure__') and func.__closure__:
-                    try:
-                        _fv2 = list(func.__code__.co_freevars)
-                        _inner_co2 = func.__closure__[_fv2.index('_co')].cell_contents
-                        if (_inner_co2.co_name == 'py2vm'
-                                and _inner_co2.co_firstlineno == py2vm.__code__.co_firstlineno):
-                            func = py2vm
-                    except Exception:
-                        pass
-                try:
-                    result = func(*args_list, **_call_kwargs)
-                    const_stack.insert(0, result)
-                except Exception as e:
-                    log.write("ERROR => could not CALL %s: %s\n" % (func, e))
-                    const_stack.insert(0, None)
-
-        elif opcode_value == 'RETURN_VALUE':
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => returned execution back to parent\n")
-            break
-
-        else:
-            log.write("unknown opcode: %s\n" % (opcode_value))
-
-    i += 1
-
-    if stack != False:
+                log.write("unknown opcode: %s (arg=%s)\n" % (opname, arg))
+
+        except Exception as _vm_exc:
+            # General exception handler: check exception table
+            _exc_handled = False
+            for _et_entry in f.exc_table:
+                _et_s, _et_e, _et_t, _et_d = _et_entry[:4]
+                _et_lasti = _et_entry[4] if len(_et_entry) > 4 else False
+                if _et_s <= offset < _et_e:
+                    while len(stk) > _et_d:
+                        stk.pop()
+                    if _et_lasti:
+                        stk.append(offset)
+                    stk.append(_vm_exc)
+                    f.ip = f.offset_to_index.get(_et_t, f.ip)
+                    _exc_handled = True
+                    break
+            if not _exc_handled:
+                raise
+
+    # Return value handling — maintain backward compatibility
+    if stack is not False:
+        if isinstance(stack, list):
+            if final_retval is not None:
+                stack.append(final_retval)
+            return stack, log
         return stack, log
     else:
         return log.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+def buildcode(code):
+    """Compile and execute a source string through the VM."""
+    return py2vm(compile(code, '<none>', 'exec'))
 
 
 _VM_EXEC_DEPTH = 0
@@ -1388,39 +1163,35 @@ def run_script(path):
     """Read a Python source file and execute it through the VM."""
     global _VM_EXEC_DEPTH
     if _VM_EXEC_DEPTH >= 1:
-        return ''   # prevent infinite meta-circular recursion
+        return ''
     _VM_EXEC_DEPTH += 1
     try:
-        _f = open(path)
-        _src = _f.read()
-        _f.close()
-        return buildcode(_src)
+        with open(path) as fh:
+            src = fh.read()
+        return buildcode(src)
     finally:
         _VM_EXEC_DEPTH -= 1
 
 
-_sys = __import__('sys')
-_argv_all = _sys.argv
-_script = _argv_all[1] if _argv_all.__len__() > 1 else None
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+if __name__ == '__main__':
+    import sys as _sys
+    _argv_all = _sys.argv
+    _script = _argv_all[1] if len(_argv_all) > 1 else None
 
-if _script is not None:
-    # Shift sys.argv by one so the inner VM sees only one arg and
-    # takes the else branch (running the built-in test) rather than
-    # trying to recurse into run_script again.
-    _sys.argv = _argv_all[1:]
-    print(run_script(_script))
-    _sys.argv = _argv_all  # restore
-else:
-    code = """
-__INTERNAL__DEBUG_LOG=1
-__INTERNAL__DEBUG_LOG_CONST=0
-
+    if _script is not None:
+        _sys.argv = _argv_all[1:]
+        print(run_script(_script))
+        _sys.argv = _argv_all
+    else:
+        code = """
 def test(order):
-    __INTERNAL__DEBUG_LOG=1
     return order
 
 print('This comes first')
 print(test('second'))
 print('and I am third')
 """
-    print(buildcode(code))
+        print(buildcode(code))
