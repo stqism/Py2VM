@@ -4,6 +4,7 @@
 
 import dis as _dis_mod
 import types as _types_mod
+import weakref as _weakref_mod
 
 # ---------------------------------------------------------------------------
 # Sentinels
@@ -34,14 +35,21 @@ class _StringIO:
 
 
 # ---------------------------------------------------------------------------
-# Bytecode decoder — wraps dis.get_instructions for a stable internal IR
+# Bytecode decode cache (WeakKeyDictionary — auto-evicts when code object dies)
 # ---------------------------------------------------------------------------
-def decode_bytecode(code):
-    """Return (instructions, offset_to_index, argvals) for a code object.
+_DECODE_CACHE = _weakref_mod.WeakKeyDictionary()
+_DECODE_HITS = 0
+_DECODE_MISSES = 0
 
+
+def _decode_uncached(code):
+    """Build the full decode payload for a code object (not cached).
+
+    Returns (instructions, offset_to_index, argvals, exc_table).
     instructions: list of (opname, arg, offset) tuples.
     offset_to_index: dict mapping byte offset -> instruction index.
     argvals: list of resolved argval per instruction (for jump targets).
+    exc_table: list of (start, end, target, depth) tuples.
     """
     raw = list(_dis_mod.get_instructions(code, adaptive=False,
                                          show_caches=False))
@@ -53,19 +61,32 @@ def decode_bytecode(code):
         arg = instr.arg if instr.arg is not None else 0
         instructions.append((instr.opname, arg, instr.offset))
         argvals.append(instr.argval)
-    return (instructions, offset_to_index, argvals)
-
-
-def _parse_exc_table(code):
-    """Parse the 3.11 exception table into (start, end, target, depth) tuples."""
-    table = []
+    exc_table = []
     if hasattr(code, 'co_exceptiontable') and code.co_exceptiontable:
         try:
             for entry in _dis_mod._parse_exception_table(code):
-                table.append((entry.start, entry.end, entry.target, entry.depth))
+                exc_table.append((entry.start, entry.end, entry.target, entry.depth))
         except Exception:
             pass
-    return table
+    return (instructions, offset_to_index, argvals, exc_table)
+
+
+def decode_cached(code):
+    """Return cached (instructions, offset_to_index, argvals, exc_table)."""
+    global _DECODE_HITS, _DECODE_MISSES
+    hit = _DECODE_CACHE.get(code)
+    if hit is not None:
+        _DECODE_HITS += 1
+        return hit
+    _DECODE_MISSES += 1
+    payload = _decode_uncached(code)
+    _DECODE_CACHE[code] = payload
+    return payload
+
+
+def decode_cache_stats():
+    """Return (hits, misses, current_size) for decode cache."""
+    return (_DECODE_HITS, _DECODE_MISSES, len(_DECODE_CACHE))
 
 
 def _get_builtins():
@@ -104,11 +125,11 @@ class Frame:
         self.block_stack = []
         self.name_dict = {}  # module-scope names keyed by index
         self.kw_names = ()
-        ir = decode_bytecode(code)
-        self.instructions = ir[0]
-        self.offset_to_index = ir[1]
-        self.argvals = ir[2]
-        self.exc_table = _parse_exc_table(code)
+        instructions, offset_to_index, argvals, exc_table = decode_cached(code)
+        self.instructions = instructions
+        self.offset_to_index = offset_to_index
+        self.argvals = argvals
+        self.exc_table = exc_table
 
 
 # ---------------------------------------------------------------------------
