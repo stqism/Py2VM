@@ -303,6 +303,161 @@ x = [1, 2, 3]
 del x[1]
 print(x)
 """),
+    # ------------------------------------------------------------------
+    # Tier 1: with-statements and exception handling
+    # ------------------------------------------------------------------
+    ("with_statement", """
+class CM:
+    def __enter__(self):
+        print('enter')
+        return self
+    def __exit__(self, *args):
+        print('exit')
+        return False
+with CM() as c:
+    print('body')
+"""),
+    ("with_exception", """
+class CM:
+    def __enter__(self):
+        return self
+    def __exit__(self, typ, val, tb):
+        print(f'exit: {typ.__name__}')
+        return True
+with CM():
+    raise ValueError('oops')
+print('after')
+"""),
+    ("with_reraise", """
+class NonSuppressor:
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+try:
+    with NonSuppressor():
+        raise ValueError('not suppressed')
+except ValueError as e:
+    print(str(e))
+"""),
+    ("try_finally", """
+def f():
+    try:
+        print('try')
+        return 1
+    finally:
+        print('finally')
+r = f()
+print(r)
+"""),
+    ("nested_with", """
+class CM:
+    def __init__(self, name):
+        self.name = name
+    def __enter__(self):
+        print(f'enter {self.name}')
+        return self
+    def __exit__(self, *a):
+        print(f'exit {self.name}')
+        return False
+with CM('a') as a, CM('b') as b:
+    print('body')
+"""),
+    # ------------------------------------------------------------------
+    # Tier 2: closures / cells
+    # ------------------------------------------------------------------
+    ("class_with_closure", """
+def make():
+    x = 10
+    class C:
+        val = x
+    return C
+print(make().val)
+"""),
+    # ------------------------------------------------------------------
+    # Tier 3: extended unpacking
+    # ------------------------------------------------------------------
+    ("unpack_ex", """
+a, *b, c = [1, 2, 3, 4, 5]
+print(a, b, c)
+first, *rest = 'hello'
+print(first, rest)
+*init, last = range(4)
+print(init, last)
+"""),
+    ("unpack_ex_empty_star", """
+a, *b, c = [1, 2]
+print(a, b, c)
+"""),
+    # ------------------------------------------------------------------
+    # Tier 4: assert
+    # ------------------------------------------------------------------
+    ("assert_pass", """
+x = 42
+assert x > 0
+print('ok')
+"""),
+    ("assert_fail", """
+try:
+    assert False, 'nope'
+except AssertionError as e:
+    print(f'caught: {e}')
+"""),
+    # ------------------------------------------------------------------
+    # Tier 5: pattern matching
+    # ------------------------------------------------------------------
+    ("match_literal", """
+def describe(x):
+    match x:
+        case 1:
+            return 'one'
+        case 2:
+            return 'two'
+        case _:
+            return 'other'
+print(describe(1))
+print(describe(2))
+print(describe(99))
+"""),
+    ("match_sequence", """
+def f(x):
+    match x:
+        case [a, b]:
+            return f'pair: {a},{b}'
+        case [a, b, c]:
+            return f'triple: {a},{b},{c}'
+        case _:
+            return 'other'
+print(f([1, 2]))
+print(f([1, 2, 3]))
+print(f('hi'))
+"""),
+    ("match_mapping", """
+def f(x):
+    match x:
+        case {'action': 'go', 'dir': d}:
+            return f'go {d}'
+        case {'action': 'stop'}:
+            return 'stop'
+        case _:
+            return 'unknown'
+print(f({'action': 'go', 'dir': 'north'}))
+print(f({'action': 'stop'}))
+print(f(42))
+"""),
+    ("match_class", """
+class Point:
+    __match_args__ = ('x', 'y')
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+def f(p):
+    match p:
+        case Point(x, y) if x > 0:
+            return f'pos: {x},{y}'
+        case Point(x, y):
+            return f'other: {x},{y}'
+print(f(Point(1, 2)))
+print(f(Point(-1, 3)))
+"""),
 ]
 
 

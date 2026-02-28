@@ -65,7 +65,8 @@ def _decode_uncached(code):
     if hasattr(code, 'co_exceptiontable') and code.co_exceptiontable:
         try:
             for entry in _dis_mod._parse_exception_table(code):
-                exc_table.append((entry.start, entry.end, entry.target, entry.depth))
+                exc_table.append((entry.start, entry.end, entry.target, entry.depth,
+                                  getattr(entry, 'lasti', False)))
         except Exception:
             pass
     return (instructions, offset_to_index, argvals, exc_table)
@@ -501,6 +502,9 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None,
             elif opname == 'JUMP_BACKWARD':
                 f.ip = f.offset_to_index[argval]
 
+            elif opname == 'JUMP_BACKWARD_NO_INTERRUPT':
+                f.ip = f.offset_to_index[argval]
+
             elif opname == 'JUMP_ABSOLUTE':
                 f.ip = f.offset_to_index[argval]
 
@@ -525,6 +529,14 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None,
                     f.ip = f.offset_to_index[argval]
 
             elif opname == 'POP_JUMP_FORWARD_IF_NOT_NONE':
+                if stk.pop() is not None:
+                    f.ip = f.offset_to_index[argval]
+
+            elif opname == 'POP_JUMP_BACKWARD_IF_NONE':
+                if stk.pop() is None:
+                    f.ip = f.offset_to_index[argval]
+
+            elif opname == 'POP_JUMP_BACKWARD_IF_NOT_NONE':
                 if stk.pop() is not None:
                     f.ip = f.offset_to_index[argval]
 
@@ -655,6 +667,22 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None,
                 for item in reversed(seq):
                     stk.append(item)
 
+            elif opname == 'UNPACK_EX':
+                count_before = arg & 0xFF
+                count_after = arg >> 8
+                seq = list(stk.pop())
+                if count_after:
+                    starred = seq[count_before:-count_after]
+                    after = seq[-count_after:]
+                else:
+                    starred = seq[count_before:]
+                    after = []
+                for a_item in reversed(after):
+                    stk.append(a_item)
+                stk.append(starred)
+                for i in range(count_before - 1, -1, -1):
+                    stk.append(seq[i])
+
             # ---------------------------------------------------------------
             # String formatting
             # ---------------------------------------------------------------
@@ -708,20 +736,50 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None,
             elif opname == 'LOAD_DEREF':
                 nlocals = f.code.co_nlocals
                 ncells = len(f.code.co_cellvars)
+                _deref_val = _UNSET
                 if arg < nlocals + ncells:
                     ci = arg - nlocals
                     if 0 <= ci < len(f.cells):
                         cell = f.cells[ci]
-                        stk.append(cell[0] if cell is not None else None)
-                    else:
-                        stk.append(None)
+                        _deref_val = cell[0] if cell is not None else _UNSET
                 else:
                     fi = arg - nlocals - ncells
                     if 0 <= fi < len(f.freevars):
                         cell = f.freevars[fi]
-                        stk.append(cell[0] if cell is not None else None)
+                        _deref_val = cell[0] if cell is not None else _UNSET
+                if _deref_val is _UNSET:
+                    if arg < nlocals + ncells:
+                        _dn = f.code.co_cellvars[arg - nlocals] if (arg - nlocals) < ncells else '?'
                     else:
-                        stk.append(None)
+                        _fi = arg - nlocals - ncells
+                        _dn = f.code.co_freevars[_fi] if _fi < len(f.code.co_freevars) else '?'
+                    raise NameError("free variable '%s' referenced before assignment in enclosing scope" % _dn)
+                stk.append(_deref_val)
+
+            elif opname == 'LOAD_CLASSDEREF':
+                nlocals = f.code.co_nlocals
+                ncells = len(f.code.co_cellvars)
+                _cd_val = _UNSET
+                # Try cell/free var first
+                if arg < nlocals + ncells:
+                    ci = arg - nlocals
+                    if 0 <= ci < len(f.cells) and f.cells[ci] is not None:
+                        _cd_val = f.cells[ci][0]
+                else:
+                    fi = arg - nlocals - ncells
+                    if 0 <= fi < len(f.freevars) and f.freevars[fi] is not None:
+                        _cd_val = f.freevars[fi][0]
+                if _cd_val is _UNSET:
+                    # Fallback: class namespace, then globals, then builtins
+                    if arg < nlocals + ncells:
+                        _cdn = f.code.co_cellvars[arg - nlocals] if (arg - nlocals) < ncells else ''
+                    else:
+                        _fi = arg - nlocals - ncells
+                        _cdn = f.code.co_freevars[_fi] if _fi < len(f.code.co_freevars) else ''
+                    _cd_val = f.globals.get(_cdn, _UNSET)
+                    if _cd_val is _UNSET:
+                        _cd_val = builtins.get(_cdn)
+                stk.append(_cd_val)
 
             elif opname == 'STORE_DEREF':
                 val = stk.pop()
@@ -737,6 +795,21 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None,
                     fi = arg - nlocals - ncells
                     if 0 <= fi < len(f.freevars) and f.freevars[fi] is not None:
                         f.freevars[fi][0] = val
+
+            elif opname == 'DELETE_DEREF':
+                nlocals = f.code.co_nlocals
+                ncells = len(f.code.co_cellvars)
+                if arg < nlocals + ncells:
+                    ci = arg - nlocals
+                    if 0 <= ci < len(f.cells):
+                        if f.cells[ci] is None:
+                            f.cells[ci] = [_UNSET]
+                        else:
+                            f.cells[ci][0] = _UNSET
+                else:
+                    fi = arg - nlocals - ncells
+                    if 0 <= fi < len(f.freevars) and f.freevars[fi] is not None:
+                        f.freevars[fi][0] = _UNSET
 
             elif opname == 'COPY_FREE_VARS':
                 # Already handled by Frame.__init__ using closure param.
@@ -759,6 +832,24 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None,
                 except TypeError:
                     stk.append(False)
 
+            elif opname == 'CHECK_EG_MATCH':
+                _eg_type = stk.pop()
+                _eg_exc = stk.pop()
+                if hasattr(_eg_exc, 'split'):
+                    _eg_match, _eg_rest = _eg_exc.split(_eg_type)
+                    if _eg_match is None:
+                        stk.append(_eg_exc)
+                        stk.append(None)
+                    else:
+                        stk.append(_eg_rest)
+                        stk.append(_eg_match)
+                elif isinstance(_eg_exc, BaseException) and isinstance(_eg_exc, _eg_type):
+                    stk.append(None)
+                    stk.append(_eg_exc)
+                else:
+                    stk.append(_eg_exc)
+                    stk.append(None)
+
             elif opname == 'POP_EXCEPT':
                 if stk:
                     stk.pop()
@@ -766,6 +857,14 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None,
             elif opname == 'RERAISE':
                 if stk and isinstance(stk[-1], BaseException):
                     raise stk[-1]
+
+            elif opname == 'PREP_RERAISE_STAR':
+                _prs_exc = stk.pop()
+                _prs_orig = stk.pop()
+                if _prs_exc is None:
+                    stk.append(None)
+                else:
+                    stk.append(_prs_exc)
 
             elif opname == 'RAISE_VARARGS':
                 if arg == 0:
@@ -782,6 +881,16 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None,
                 exit_method = mgr.__exit__
                 stk[-1] = exit_method
                 stk.append(mgr.__enter__())
+
+            elif opname == 'WITH_EXCEPT_START':
+                # Stack: [..., __exit__, lasti, prev_exc, exc]
+                exc = stk[-1]
+                exit_fn = stk[-4]
+                if isinstance(exc, BaseException):
+                    res = exit_fn(type(exc), exc, exc.__traceback__)
+                else:
+                    res = exit_fn(None, None, None)
+                stk.append(res)
 
             # ---------------------------------------------------------------
             # Import operations
@@ -806,6 +915,64 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None,
             # ---------------------------------------------------------------
             elif opname == 'LOAD_BUILD_CLASS':
                 stk.append(builtins.get('__build_class__', __builtins__.__build_class__ if hasattr(__builtins__, '__build_class__') else None))
+
+            elif opname == 'LOAD_ASSERTION_ERROR':
+                stk.append(AssertionError)
+
+            elif opname == 'PRINT_EXPR':
+                _pval = stk.pop()
+                if _pval is not None:
+                    print(repr(_pval))
+
+            # ---------------------------------------------------------------
+            # Pattern matching (match/case)
+            # ---------------------------------------------------------------
+            elif opname == 'GET_LEN':
+                stk.append(len(stk[-1]))
+
+            elif opname == 'MATCH_MAPPING':
+                from collections.abc import Mapping as _Mapping
+                stk.append(isinstance(stk[-1], _Mapping))
+
+            elif opname == 'MATCH_SEQUENCE':
+                from collections.abc import Sequence as _Sequence
+                _ms_val = stk[-1]
+                stk.append(isinstance(_ms_val, _Sequence)
+                           and not isinstance(_ms_val, (str, bytes, bytearray)))
+
+            elif opname == 'MATCH_KEYS':
+                _mk_keys = stk[-1]
+                _mk_subj = stk[-2]
+                try:
+                    _mk_vals = []
+                    for _mk_k in _mk_keys:
+                        if _mk_k not in _mk_subj:
+                            stk.append(None)
+                            break
+                        _mk_vals.append(_mk_subj[_mk_k])
+                    else:
+                        stk.append(tuple(_mk_vals))
+                except (TypeError, KeyError):
+                    stk.append(None)
+
+            elif opname == 'MATCH_CLASS':
+                _mc_kw = stk.pop()
+                _mc_cls = stk.pop()
+                _mc_subj = stk.pop()
+                if not isinstance(_mc_subj, _mc_cls):
+                    stk.append(None)
+                else:
+                    _mc_args = getattr(_mc_cls, '__match_args__', ())
+                    try:
+                        _mc_pos = []
+                        for _mc_i in range(arg):
+                            _mc_pos.append(getattr(_mc_subj, _mc_args[_mc_i]))
+                        _mc_kwv = []
+                        for _mc_an in _mc_kw:
+                            _mc_kwv.append(getattr(_mc_subj, _mc_an))
+                        stk.append(tuple(_mc_pos + _mc_kwv))
+                    except (AttributeError, IndexError):
+                        stk.append(None)
 
             # ---------------------------------------------------------------
             # KW_NAMES
@@ -878,8 +1045,16 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None,
                     if (func is builtins.get('__build_class__') and
                             args_list and isinstance(args_list[0], VMFunction)):
                         vmf = args_list[0]
-                        args_list[0] = _types_mod.FunctionType(
-                            vmf.code, vmf.globals)
+                        if vmf.closure:
+                            _cls_closure = tuple(
+                                (lambda _v: (lambda: _v).__closure__[0])(
+                                    c[0] if c else None) for c in vmf.closure)
+                            args_list[0] = _types_mod.FunctionType(
+                                vmf.code, vmf.globals, vmf.name, None,
+                                _cls_closure)
+                        else:
+                            args_list[0] = _types_mod.FunctionType(
+                                vmf.code, vmf.globals)
                     stk.append(func(*args_list, **call_kwargs))
 
             # ---------------------------------------------------------------
@@ -947,10 +1122,14 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None,
         except Exception as _vm_exc:
             # General exception handler: check exception table
             _exc_handled = False
-            for _et_s, _et_e, _et_t, _et_d in f.exc_table:
+            for _et_entry in f.exc_table:
+                _et_s, _et_e, _et_t, _et_d = _et_entry[:4]
+                _et_lasti = _et_entry[4] if len(_et_entry) > 4 else False
                 if _et_s <= offset < _et_e:
                     while len(stk) > _et_d:
                         stk.pop()
+                    if _et_lasti:
+                        stk.append(offset)
                     stk.append(_vm_exc)
                     f.ip = f.offset_to_index.get(_et_t, f.ip)
                     _exc_handled = True
