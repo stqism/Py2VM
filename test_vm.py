@@ -458,6 +458,301 @@ def f(p):
 print(f(Point(1, 2)))
 print(f(Point(-1, 3)))
 """),
+
+    # ------------------------------------------------------------------
+    # Tier 6: Generators
+    # ------------------------------------------------------------------
+    ("gen_basic", """
+def gen():
+    yield 1
+    yield 2
+    yield 3
+print(list(gen()))
+"""),
+    ("gen_send", """
+def echo():
+    val = yield 'ready'
+    while val is not None:
+        val = yield f'echo: {val}'
+g = echo()
+print(next(g))
+print(g.send('hello'))
+print(g.send('world'))
+"""),
+    ("gen_return_value", """
+def gen():
+    yield 1
+    return 42
+g = gen()
+print(next(g))
+try:
+    next(g)
+except StopIteration as e:
+    print(e.value)
+"""),
+    ("gen_close", """
+def gen():
+    try:
+        yield 1
+        yield 2
+    except GeneratorExit:
+        pass
+g = gen()
+print(next(g))
+g.close()
+print('closed ok')
+"""),
+    ("gen_throw", """
+def gen():
+    try:
+        yield 1
+    except ValueError as e:
+        yield f'caught: {e}'
+g = gen()
+print(next(g))
+print(g.throw(ValueError, 'oops'))
+"""),
+    ("gen_expression", """
+print(sum(x*x for x in range(5)))
+print(list(x for x in range(4) if x % 2 == 0))
+"""),
+    ("gen_for_iteration", """
+def count_up(n):
+    i = 0
+    while i < n:
+        yield i
+        i += 1
+result = []
+for x in count_up(5):
+    result.append(x)
+print(result)
+"""),
+    ("gen_multiple_yields", """
+def fib(n):
+    a, b = 0, 1
+    for _ in range(n):
+        yield a
+        a, b = b, a + b
+print(list(fib(8)))
+"""),
+    ("gen_nested", """
+def inner():
+    yield 'a'
+    yield 'b'
+def outer():
+    for x in inner():
+        yield x.upper()
+    yield 'C'
+print(list(outer()))
+"""),
+
+    # ------------------------------------------------------------------
+    # Tier 6: yield from
+    # ------------------------------------------------------------------
+    ("yield_from_basic", """
+def inner():
+    yield 1
+    yield 2
+    return 'done'
+def outer():
+    result = yield from inner()
+    print(result)
+    yield 3
+print(list(outer()))
+"""),
+    ("yield_from_list", """
+def gen():
+    yield from [10, 20, 30]
+print(list(gen()))
+"""),
+    ("yield_from_range", """
+def gen():
+    yield from range(5)
+print(list(gen()))
+"""),
+    ("yield_from_send", """
+def bottom():
+    val = yield 'bottom'
+    return val * 2
+def middle():
+    result = yield from bottom()
+    return result + 10
+def top():
+    result = yield from middle()
+    yield result
+g = top()
+print(next(g))
+print(g.send(5))
+"""),
+    ("yield_from_chain", """
+def gen1():
+    yield 1
+    yield 2
+def gen2():
+    yield from gen1()
+    yield 3
+def gen3():
+    yield from gen2()
+    yield 4
+print(list(gen3()))
+"""),
+
+    # ------------------------------------------------------------------
+    # Tier 6: Coroutines (async/await)
+    # ------------------------------------------------------------------
+    ("coroutine_basic", """
+from py2vm import vm_run
+async def add(a, b):
+    return a + b
+async def main():
+    result = await add(3, 4)
+    return result
+print(vm_run(main()))
+"""),
+    ("coroutine_nested_await", """
+from py2vm import vm_run
+async def double(x):
+    return x * 2
+async def add_doubled(a, b):
+    da = await double(a)
+    db = await double(b)
+    return da + db
+async def main():
+    print(await add_doubled(3, 4))
+vm_run(main())
+"""),
+    ("coroutine_try_except", """
+from py2vm import vm_run
+async def failing():
+    raise ValueError('async error')
+async def main():
+    try:
+        await failing()
+    except ValueError as e:
+        print(f'caught: {e}')
+vm_run(main())
+"""),
+
+    # ------------------------------------------------------------------
+    # Tier 6: Async generators
+    # ------------------------------------------------------------------
+    ("async_gen_basic", """
+from py2vm import vm_run
+async def async_count(n):
+    for i in range(n):
+        yield i
+async def main():
+    result = []
+    async for x in async_count(5):
+        result.append(x)
+    print(result)
+vm_run(main())
+"""),
+    ("async_gen_with_await", """
+from py2vm import vm_run
+async def compute(x):
+    return x * 10
+async def async_mapped(n):
+    for i in range(n):
+        val = await compute(i)
+        yield val
+async def main():
+    result = []
+    async for x in async_mapped(4):
+        result.append(x)
+    print(result)
+vm_run(main())
+"""),
+
+    # ------------------------------------------------------------------
+    # Tier 6: async with
+    # ------------------------------------------------------------------
+    ("async_with_basic", """
+from py2vm import vm_run
+class AsyncCM:
+    async def __aenter__(self):
+        print('enter')
+        return self
+    async def __aexit__(self, *args):
+        print('exit')
+        return False
+async def main():
+    async with AsyncCM() as cm:
+        print('body')
+vm_run(main())
+"""),
+    ("async_with_exception", """
+from py2vm import vm_run
+class AsyncCM:
+    async def __aenter__(self):
+        return self
+    async def __aexit__(self, typ, val, tb):
+        print(f'exit: {typ.__name__}')
+        return True
+async def main():
+    async with AsyncCM():
+        raise ValueError('oops')
+    print('after')
+vm_run(main())
+"""),
+
+    # ------ Regression tests for edge-case bug fixes ------
+
+    ("gen_stopiter_pep479", """
+def gen():
+    yield 1
+    raise StopIteration('manual')
+g = gen()
+print(next(g))
+try:
+    next(g)
+except RuntimeError as e:
+    print(f'RuntimeError: {e}')
+print('done')
+"""),
+
+    ("gen_close_yields_error", """
+def gen():
+    try:
+        yield 1
+    except GeneratorExit:
+        yield 2
+g = gen()
+next(g)
+try:
+    g.close()
+except RuntimeError as e:
+    print(f'RuntimeError: {e}')
+print('done')
+"""),
+
+    ("gen_del_finalization", """
+import gc
+finalized = False
+def gen():
+    global finalized
+    try:
+        yield 1
+        yield 2
+    finally:
+        finalized = True
+g = gen()
+next(g)
+del g
+gc.collect()
+print(f'finalized: {finalized}')
+"""),
+
+    ("gen_yield_from_rejects_coro", """
+async def coro():
+    return 42
+def gen():
+    try:
+        yield from coro()
+    except TypeError as e:
+        print(f'TypeError caught')
+list(gen())
+"""),
 ]
 
 
