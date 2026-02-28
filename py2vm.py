@@ -118,7 +118,7 @@ class Frame:
         'code', 'ip', 'stack', 'locals_fast', 'cells', 'freevars',
         'globals', 'builtins', 'block_stack', 'name_dict',
         'kw_names', 'instructions', 'offset_to_index', 'argvals',
-        'exc_table',
+        'exc_table', 'yield_offset',
     )
 
     def __init__(self, code, globals_dict, builtins_dict, closure=None):
@@ -143,6 +143,7 @@ class Frame:
         self.offset_to_index = offset_to_index
         self.argvals = argvals
         self.exc_table = exc_table
+        self.yield_offset = 0
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +242,12 @@ class VMGenerator:
                     "can't send non-None value to a just-started generator")
             self._started = True
         self._frame.stack.append(value)
-        result, signal = _run_frames([self._frame], self._builtins, self._log)
+        try:
+            result, signal = _run_frames(
+                [self._frame], self._builtins, self._log)
+        except StopIteration as _si:
+            self._closed = True
+            raise RuntimeError("generator raised StopIteration") from _si
         if signal is _YIELD:
             return result
         self._closed = True
@@ -269,8 +275,13 @@ class VMGenerator:
                         target = self._frame.argvals[i]
                         self._frame.ip = self._frame.offset_to_index[target]
                         break
-                result, signal = _run_frames(
-                    [self._frame], self._builtins, self._log)
+                try:
+                    result, signal = _run_frames(
+                        [self._frame], self._builtins, self._log)
+                except StopIteration as _si:
+                    self._closed = True
+                    raise RuntimeError(
+                        "generator raised StopIteration") from _si
                 if signal is _YIELD:
                     return result
                 self._closed = True
@@ -281,12 +292,7 @@ class VMGenerator:
 
         # Normal throw: find exception handler via exception table
         f = self._frame
-        # Offset of the yield point (instruction before current ip)
-        yield_offset = 0
-        for i in range(f.ip - 1, -1, -1):
-            if f.instructions[i][0] in ('YIELD_VALUE', 'RETURN_GENERATOR'):
-                yield_offset = f.instructions[i][2]
-                break
+        yield_offset = f.yield_offset
 
         handled = False
         for entry in f.exc_table:
@@ -303,8 +309,13 @@ class VMGenerator:
                 break
 
         if handled:
-            result, signal = _run_frames(
-                [self._frame], self._builtins, self._log)
+            try:
+                result, signal = _run_frames(
+                    [self._frame], self._builtins, self._log)
+            except StopIteration as _si:
+                self._closed = True
+                raise RuntimeError(
+                    "generator raised StopIteration") from _si
             if signal is _YIELD:
                 return result
             self._closed = True
@@ -324,7 +335,13 @@ class VMGenerator:
         except BaseException:
             self._closed = True
             raise
+        # Generator yielded after receiving GeneratorExit
         self._closed = True
+        raise RuntimeError("generator ignored GeneratorExit")
+
+    def __del__(self):
+        if not self._closed:
+            self.close()
 
 
 class VMCoroutine:
@@ -355,7 +372,13 @@ class VMCoroutine:
                     "can't send non-None value to a just-started coroutine")
             self._started = True
         self._frame.stack.append(value)
-        result, signal = _run_frames([self._frame], self._builtins, self._log)
+        try:
+            result, signal = _run_frames(
+                [self._frame], self._builtins, self._log)
+        except StopIteration as _si:
+            self._closed = True
+            raise RuntimeError(
+                "coroutine raised StopIteration") from _si
         if signal is _YIELD:
             return result
         self._closed = True
@@ -381,8 +404,13 @@ class VMCoroutine:
                         target = self._frame.argvals[i]
                         self._frame.ip = self._frame.offset_to_index[target]
                         break
-                result, signal = _run_frames(
-                    [self._frame], self._builtins, self._log)
+                try:
+                    result, signal = _run_frames(
+                        [self._frame], self._builtins, self._log)
+                except StopIteration as _si:
+                    self._closed = True
+                    raise RuntimeError(
+                        "coroutine raised StopIteration") from _si
                 if signal is _YIELD:
                     return result
                 self._closed = True
@@ -392,11 +420,7 @@ class VMCoroutine:
                 raise
 
         f = self._frame
-        yield_offset = 0
-        for i in range(f.ip - 1, -1, -1):
-            if f.instructions[i][0] in ('YIELD_VALUE', 'RETURN_GENERATOR'):
-                yield_offset = f.instructions[i][2]
-                break
+        yield_offset = f.yield_offset
 
         handled = False
         for entry in f.exc_table:
@@ -413,8 +437,13 @@ class VMCoroutine:
                 break
 
         if handled:
-            result, signal = _run_frames(
-                [self._frame], self._builtins, self._log)
+            try:
+                result, signal = _run_frames(
+                    [self._frame], self._builtins, self._log)
+            except StopIteration as _si:
+                self._closed = True
+                raise RuntimeError(
+                    "coroutine raised StopIteration") from _si
             if signal is _YIELD:
                 return result
             self._closed = True
@@ -434,7 +463,13 @@ class VMCoroutine:
         except BaseException:
             self._closed = True
             raise
+        # Coroutine yielded after receiving GeneratorExit
         self._closed = True
+        raise RuntimeError("coroutine ignored GeneratorExit")
+
+    def __del__(self):
+        if not self._closed:
+            self.close()
 
 
 class VMAsyncGenASend:
@@ -508,11 +543,7 @@ class VMAsyncGenAThrow:
         f = gen._frame
         stk = f.stack
 
-        yield_offset = 0
-        for i in range(f.ip - 1, -1, -1):
-            if f.instructions[i][0] in ('YIELD_VALUE', 'RETURN_GENERATOR'):
-                yield_offset = f.instructions[i][2]
-                break
+        yield_offset = f.yield_offset
 
         handled = False
         for entry in f.exc_table:
@@ -566,6 +597,10 @@ class VMAsyncGenerator:
 
     def aclose(self):
         return VMAsyncGenAThrow(self, GeneratorExit, None)
+
+    def __del__(self):
+        if not self._closed:
+            self._closed = True
 
 
 # ---------------------------------------------------------------------------
@@ -1444,6 +1479,7 @@ def _run_frames(frames, builtins, log):
             # ---------------------------------------------------------------
             elif opname == 'RETURN_GENERATOR':
                 gen_frame = frames.pop()
+                gen_frame.yield_offset = offset
                 flags = gen_frame.code.co_flags
                 if flags & 0x200:        # CO_ASYNC_GENERATOR
                     obj = VMAsyncGenerator(gen_frame, builtins, log)
@@ -1458,6 +1494,7 @@ def _run_frames(frames, builtins, log):
                 continue
 
             elif opname == 'YIELD_VALUE':
+                f.yield_offset = offset
                 yielded = stk.pop()
                 return (yielded, _YIELD)
 
@@ -1477,8 +1514,11 @@ def _run_frames(frames, builtins, log):
 
             elif opname == 'GET_YIELD_FROM_ITER':
                 iterable = stk[-1]
-                if not isinstance(iterable,
-                                  (VMGenerator, VMCoroutine)):
+                if isinstance(iterable, VMCoroutine):
+                    raise TypeError(
+                        "cannot 'yield from' a coroutine object "
+                        "in a non-coroutine generator")
+                elif not isinstance(iterable, VMGenerator):
                     stk[-1] = iter(iterable)
 
             elif opname == 'GET_AWAITABLE':
@@ -1487,6 +1527,10 @@ def _run_frames(frames, builtins, log):
                     pass  # already its own await-iterator
                 elif hasattr(obj, '__await__'):
                     stk[-1] = obj.__await__()
+                else:
+                    raise TypeError(
+                        "object %s can't be used in 'await' expression"
+                        % type(obj).__name__)
 
             elif opname == 'ASYNC_GEN_WRAP':
                 stk[-1] = _AsyncGenWrappedValue(stk[-1])

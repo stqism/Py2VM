@@ -695,6 +695,64 @@ async def main():
     print('after')
 vm_run(main())
 """),
+
+    # ------ Regression tests for edge-case bug fixes ------
+
+    ("gen_stopiter_pep479", """
+def gen():
+    yield 1
+    raise StopIteration('manual')
+g = gen()
+print(next(g))
+try:
+    next(g)
+except RuntimeError as e:
+    print(f'RuntimeError: {e}')
+print('done')
+"""),
+
+    ("gen_close_yields_error", """
+def gen():
+    try:
+        yield 1
+    except GeneratorExit:
+        yield 2
+g = gen()
+next(g)
+try:
+    g.close()
+except RuntimeError as e:
+    print(f'RuntimeError: {e}')
+print('done')
+"""),
+
+    ("gen_del_finalization", """
+import gc
+finalized = False
+def gen():
+    global finalized
+    try:
+        yield 1
+        yield 2
+    finally:
+        finalized = True
+g = gen()
+next(g)
+del g
+gc.collect()
+print(f'finalized: {finalized}')
+"""),
+
+    ("gen_yield_from_rejects_coro", """
+async def coro():
+    return 42
+def gen():
+    try:
+        yield from coro()
+    except TypeError as e:
+        print(f'TypeError caught')
+list(gen())
+"""),
 ]
 
 
