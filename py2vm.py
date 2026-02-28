@@ -516,7 +516,24 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None, globals_frame=
 
         elif opcode_value == 'STORE_NAME':
             name_dict[arg] = const_stack.pop(0)
-            globals_frame[bytecode.co_names[arg]] = name_dict[arg]
+            _sn_val = name_dict[arg]
+            # When the inner VM stores a wrapped py2vm (an _mf_callable whose
+            # inner code object is py2vm's function body, identified by co_name
+            # and co_firstlineno), substitute the native py2vm function.  This
+            # prevents infinite re-interpretation when the inner buildcode()
+            # calls py2vm() via LOAD_GLOBAL.
+            if (bytecode.co_names[arg] == 'py2vm'
+                    and hasattr(_sn_val, '__closure__') and _sn_val.__closure__):
+                try:
+                    _fv_sn = list(_sn_val.__code__.co_freevars)
+                    _co_sn = _sn_val.__closure__[_fv_sn.index('_co')].cell_contents
+                    if (_co_sn.co_name == 'py2vm'
+                            and _co_sn.co_firstlineno == py2vm.__code__.co_firstlineno):
+                        _sn_val = py2vm
+                        name_dict[arg] = py2vm
+                except Exception:
+                    pass
+            globals_frame[bytecode.co_names[arg]] = _sn_val
             if bytecode.co_names[arg] == '__INTERNAL__DEBUG_LOG':
                 __INTERNAL__DEBUG_LOG = name_dict[arg]
 
@@ -1019,6 +1036,25 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None, globals_frame=
             _ss_val = const_stack.pop(0)
             _ss_obj[_ss_key] = _ss_val
 
+        elif opcode_value == 'STORE_ATTR':
+            # TOS.name = TOS1; pops both.
+            _sa_obj = const_stack.pop(0)
+            _sa_val = const_stack.pop(0)
+            setattr(_sa_obj, bytecode.co_names[arg], _sa_val)
+
+        elif opcode_value == 'BUILD_SLICE':
+            # arg=2: pop stop, start → push slice(start, stop)
+            # arg=3: pop step, stop, start → push slice(start, stop, step)
+            if arg == 3:
+                _bs_step = const_stack.pop(0)
+                _bs_stop = const_stack.pop(0)
+                _bs_start = const_stack.pop(0)
+                const_stack.insert(0, slice(_bs_start, _bs_stop, _bs_step))
+            else:
+                _bs_stop = const_stack.pop(0)
+                _bs_start = const_stack.pop(0)
+                const_stack.insert(0, slice(_bs_start, _bs_stop))
+
         elif opcode_value == 'DELETE_SUBSCR':
             # del TOS1[TOS]; pops both.
             _ds_key = const_stack.pop(0)
@@ -1231,6 +1267,18 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None, globals_frame=
                             pass
                 except AttributeError:
                     pass
+                # If func is an _mf_callable wrapping py2vm's own code object,
+                # substitute native py2vm to prevent infinite re-interpretation
+                # when the inner VM calls py2vm() (e.g. from buildcode).
+                if hasattr(func, '__closure__') and func.__closure__:
+                    try:
+                        _fv2 = list(func.__code__.co_freevars)
+                        _inner_co2 = func.__closure__[_fv2.index('_co')].cell_contents
+                        if (_inner_co2.co_name == 'py2vm'
+                                and _inner_co2.co_firstlineno == py2vm.__code__.co_firstlineno):
+                            func = py2vm
+                    except Exception:
+                        pass
                 try:
                     result = func(*args_list, **kwargs)
                     const_stack.insert(0, result)
@@ -1297,6 +1345,18 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None, globals_frame=
                             pass
                 except AttributeError:
                     pass
+                # If func is an _mf_callable wrapping py2vm's own code object,
+                # substitute native py2vm to prevent infinite re-interpretation
+                # when the inner VM calls py2vm() (e.g. from buildcode).
+                if hasattr(func, '__closure__') and func.__closure__:
+                    try:
+                        _fv2 = list(func.__code__.co_freevars)
+                        _inner_co2 = func.__closure__[_fv2.index('_co')].cell_contents
+                        if (_inner_co2.co_name == 'py2vm'
+                                and _inner_co2.co_firstlineno == py2vm.__code__.co_firstlineno):
+                            func = py2vm
+                    except Exception:
+                        pass
                 try:
                     result = func(*args_list, **_call_kwargs)
                     const_stack.insert(0, result)
