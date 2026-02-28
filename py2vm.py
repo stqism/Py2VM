@@ -37,17 +37,33 @@ _OPNAME_RAW = {
     146: 'SET_ADD', 147: 'MAP_ADD',
     # Python 3.11 wordcode additions / conflict overrides
     2: 'PUSH_NULL',                    # was ROT_TWO
+    35: 'PUSH_EXC_INFO',               # new in 3.11
+    36: 'CHECK_EXC_MATCH',             # new in 3.11
     71: 'LOAD_BUILD_CLASS',            # was PRINT_ITEM
+    89: 'POP_EXCEPT',                  # was BUILD_CLASS in Python 2
+    99: 'SWAP',                        # was DUP_TOPX in Python 2
     114: 'POP_JUMP_FORWARD_IF_FALSE',  # was POP_JUMP_IF_FALSE
     115: 'POP_JUMP_FORWARD_IF_TRUE',   # was POP_JUMP_IF_TRUE
+    117: 'IS_OP',                      # new in 3.9+
+    118: 'CONTAINS_OP',               # new in 3.9+
+    119: 'RERAISE',                    # was CONTINUE_LOOP in Python 2
+    120: 'COPY',                       # was SETUP_LOOP in Python 2
     122: 'BINARY_OP',                  # was SETUP_FINALLY
+    128: 'POP_JUMP_FORWARD_IF_NOT_NONE',  # new
     129: 'POP_JUMP_FORWARD_IF_NONE',   # new
+    135: 'MAKE_CELL',                  # was LOAD_CLOSURE in Python 2; Python 3.11 shifted by 1
+    136: 'LOAD_CLOSURE',               # was LOAD_DEREF in Python 2
+    137: 'LOAD_DEREF',                 # was STORE_DEREF in Python 2
+    138: 'STORE_DEREF',                # new slot in Python 3.11
     140: 'JUMP_BACKWARD',              # was CALL_FUNCTION_VAR
+    142: 'CALL_FUNCTION_EX',           # was CALL_FUNCTION_VAR_KW in Python 2
     144: 'EXTENDED_ARG',               # was not in table (145 was in Python 2)
-    151: 'RESUME', 160: 'LOAD_METHOD',
+    149: 'COPY_FREE_VARS',             # new in 3.11
+    151: 'RESUME', 155: 'FORMAT_VALUE', 156: 'BUILD_CONST_KEY_MAP',
+    157: 'BUILD_STRING', 160: 'LOAD_METHOD',
     164: 'DICT_MERGE', 165: 'DICT_UPDATE', 166: 'PRECALL', 171: 'CALL',
+    172: 'KW_NAMES',
     175: 'POP_JUMP_BACKWARD_IF_FALSE', 176: 'POP_JUMP_BACKWARD_IF_TRUE',
-    156: 'BUILD_CONST_KEY_MAP', 128: 'POP_JUMP_FORWARD_IF_NOT_NONE',
 }
 # Build OPNAME list without xrange — while loop with arithmetic only
 _i = 0
@@ -198,7 +214,7 @@ def bytecode_optimize(bytecode):
             offset_to_index[_ext_off] = index_counter
         pending_ext_offsets = []
         offset_to_index[offset] = index_counter
-        bytecode_list.append([opcode_value, arg])
+        bytecode_list.append([opcode_value, arg, offset])
         index_counter += 1
     return bytecode_list, offset_to_index
 
@@ -231,12 +247,16 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None, globals_frame=
     __INTERNAL__DEBUG_LOG_VAR = 0
     name_dict = {}
     globals_frame = globals_frame if globals_frame is not None else {'__builtins__': __builtins__}
+    # Cell variable storage: maps localsplus-index → [value] (mutable cell)
+    _cells = {}
+    # Free variable cells: list of [value] cells, one per co_freevars entry
+    _free_cells = [None] * len(bytecode.co_freevars)
 
     # Factory: create a real callable that runs a code object through the VM.
     # Using a factory rather than a bare closure ensures each call captures its
     # own _co/_gf values rather than sharing a reference to the loop variable.
-    def _mf_make(_co, _gf, _defaults=()):
-        def _mf_callable(*_args):
+    def _mf_make(_co, _gf, _defaults=(), _closure=None):
+        def _mf_callable(*_args, **_kwargs):
             _fl = {}
             # Apply default values first so all parameters have correct defaults.
             # _defaults is the positional-defaults tuple captured at MAKE_FUNCTION
@@ -248,25 +268,49 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None, globals_frame=
             while _di < _num_defaults:
                 _fl[_co.co_varnames[_first_default + _di]] = _defaults[_di]
                 _di += 1
-            # Apply provided positional args, overriding any defaults.
+            # Apply positional args to regular parameters (indices 0..co_argcount-1).
             _idx = 0
-            for _val in _args:
-                try:
-                    _fl[_co.co_varnames[_idx]] = _val
-                except IndexError:
-                    pass
+            while _idx < _num_params and _idx < len(_args):
+                _fl[_co.co_varnames[_idx]] = _args[_idx]
                 _idx += 1
+            # If the function has a *args parameter (CO_VARARGS = 0x04), assign the
+            # remaining positional args as a tuple to co_varnames[co_argcount].
+            if _co.co_flags & 0x04:
+                _fl[_co.co_varnames[_num_params]] = _args[_num_params:]
+            # If the function has a **kwargs parameter (CO_VARKEYWORDS = 0x08),
+            # assign the entire kwargs dict to the **kwargs variable name.
+            # Otherwise spread individual keyword args by name (handles VM-level
+            # calls like py2vm(..., fast_locals=..., globals_frame=...)).
+            if _co.co_flags & 0x08:
+                _kw_idx = _num_params + (1 if _co.co_flags & 0x04 else 0)
+                _fl[_co.co_varnames[_kw_idx]] = _kwargs
+            else:
+                for _kname, _kval in _kwargs.items():
+                    _fl[_kname] = _kval
+            # Pass closure cells so COPY_FREE_VARS can populate _free_cells.
+            if _closure is not None:
+                _fl['__closure__'] = _closure
             _rs, _ig = py2vm(_co, [], False, fast_locals=_fl, globals_frame=_gf)
-            if _co.co_name in ('buildcode', 'py2vm'):
-                import sys as _sys
-                _sys.stderr.write('TRACE _mf_callable(%s): _rs=%r err=%s\n' % (
-                    _co.co_name, _rs[:1] if _rs else [], _ig.getvalue()[-400:] if hasattr(_ig, 'getvalue') else ''))
             return _rs[0] if _rs else None
         return _mf_callable
 
     # I was inspired by str8C
     i = -1
     opcode_array, offset_to_index = bytecode_optimize(bytecode)
+
+    # Build exception table for Python 3.11+ so try/except in interpreted code works.
+    _exc_table = []
+    if py3_mode and hasattr(bytecode, 'co_exceptiontable') and bytecode.co_exceptiontable:
+        try:
+            import dis as _dis_mod
+            for _et in _dis_mod._parse_exception_table(bytecode):
+                _exc_table.append((_et.start, _et.end, _et.target, _et.depth))
+        except Exception:
+            pass
+
+    # Keyword-argument names set by KW_NAMES before a CALL opcode.
+    _kw_names = ()
+
     while True:
         i += 1
         try:
@@ -275,6 +319,8 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None, globals_frame=
             break
         opcode_value = opcode_pack[0]
         arg = opcode_pack[1]
+        # Bytecode offset of this instruction (used for exception table lookup).
+        _cur_offset = opcode_pack[2] if len(opcode_pack) > 2 else -1
 
         # log.write(const_stack)
         # log.write(opcode_value)
@@ -407,6 +453,66 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None, globals_frame=
             if __INTERNAL__DEBUG_LOG:
                 log.write("DEBUG => stored %s into %s\n" % (
                     fast_dict[bytecode.co_varnames[arg]], bytecode.co_varnames[arg]))
+
+        elif opcode_value == 'MAKE_CELL':
+            # Python 3.11: convert local at localsplus[arg] into a cell object.
+            # arg is the localsplus index; for cellvars that are also params,
+            # this equals the co_varnames index.
+            _mc_name = bytecode.co_varnames[arg] if arg < len(bytecode.co_varnames) else ''
+            _cells[arg] = [fast_dict.get(_mc_name)]
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => MAKE_CELL %d (%s)\n" % (arg, _mc_name))
+
+        elif opcode_value == 'LOAD_CLOSURE':
+            # Push the cell object at localsplus[arg] (a cellvar).
+            const_stack.insert(0, _cells.get(arg, [None]))
+            if __INTERNAL__DEBUG_LOG:
+                _lc_name = bytecode.co_varnames[arg] if arg < len(bytecode.co_varnames) else str(arg)
+                log.write("DEBUG => LOAD_CLOSURE %d (%s)\n" % (arg, _lc_name))
+
+        elif opcode_value == 'LOAD_DEREF':
+            # arg < len(co_varnames): cellvar at _cells[arg]; else freevar.
+            _ld_n = len(bytecode.co_varnames)
+            if arg < _ld_n:
+                _ld_cell = _cells.get(arg, [None])
+            else:
+                _ld_fi = arg - _ld_n
+                _ld_cell = _free_cells[_ld_fi] if _ld_fi < len(_free_cells) else [None]
+            const_stack.insert(0, _ld_cell[0] if _ld_cell is not None else None)
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => LOAD_DEREF %d => %r\n" % (arg, const_stack[0]))
+
+        elif opcode_value == 'STORE_DEREF':
+            _sd_val = const_stack.pop(0)
+            _sd_n = len(bytecode.co_varnames)
+            if arg < _sd_n:
+                if arg not in _cells:
+                    _cells[arg] = [None]
+                _cells[arg][0] = _sd_val
+            else:
+                _sd_fi = arg - _sd_n
+                if _sd_fi < len(_free_cells) and _free_cells[_sd_fi] is not None:
+                    _free_cells[_sd_fi][0] = _sd_val
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => STORE_DEREF %d\n" % arg)
+
+        elif opcode_value == 'COPY_FREE_VARS':
+            # Populate _free_cells[0..arg-1] from fast_dict['__closure__'].
+            _cfv_closure = fast_dict.get('__closure__')
+            if _cfv_closure is not None:
+                _cfv_i = 0
+                while _cfv_i < arg and _cfv_i < len(_cfv_closure):
+                    _free_cells[_cfv_i] = _cfv_closure[_cfv_i]
+                    _cfv_i += 1
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => COPY_FREE_VARS %d\n" % arg)
+
+        elif opcode_value == 'SWAP':
+            # SWAP(i): swap TOS (index 0) with stack[i-1] (1-indexed from TOS).
+            if arg > 1 and len(const_stack) >= arg:
+                const_stack[0], const_stack[arg - 1] = const_stack[arg - 1], const_stack[0]
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => SWAP %d\n" % arg)
 
         elif opcode_value == 'STORE_NAME':
             name_dict[arg] = const_stack.pop(0)
@@ -552,10 +658,23 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None, globals_frame=
         elif opcode_value == 'BINARY_SUBSCR':
             math0 = const_stack.pop(0)
             math1 = const_stack.pop(0)
-            const_stack.insert(0, math1[math0])
-
-            if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => set tos to %s[%s]\n" % (math1, math0))
+            try:
+                const_stack.insert(0, math1[math0])
+                if __INTERNAL__DEBUG_LOG:
+                    log.write("DEBUG => set tos to %s[%s]\n" % (math1, math0))
+            except Exception as _subscr_exc:
+                _subscr_handled = False
+                for _et_s, _et_e, _et_t, _et_d in _exc_table:
+                    if _et_s <= _cur_offset < _et_e:
+                        while len(const_stack) > _et_d:
+                            const_stack.pop(0)
+                        const_stack.insert(0, _subscr_exc)
+                        i = offset_to_index.get(_et_t, i) - 1
+                        _subscr_handled = True
+                        break
+                if not _subscr_handled:
+                    log.write("ERROR => BINARY_SUBSCR failed: %s\n" % _subscr_exc)
+                    const_stack.insert(0, None)
 
         elif opcode_value == 'BINARY_LSHIFT':
             math0 = const_stack.pop(0).__int__()
@@ -829,9 +948,14 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None, globals_frame=
                 log.write("DEBUG => BUILD_CONST_KEY_MAP %d\n" % arg)
 
         elif opcode_value in ('DICT_UPDATE', 'DICT_MERGE'):
-            # DICT_UPDATE/DICT_MERGE i: pop TOS, merge into dict at stack[i-1]
+            # DICT_UPDATE/DICT_MERGE i: pop TOS (source), merge into dict at stack[i-1]
             _du_other = const_stack.pop(0)
-            const_stack[arg - 1].update(_du_other)
+            _du_dst = const_stack[arg - 1] if len(const_stack) >= arg else None
+            if isinstance(_du_dst, dict):
+                _du_dst.update(_du_other)
+            else:
+                log.write("ERROR => %s: dst at [%d] is %r, src=%r, stack depth=%d\n" % (
+                    opcode_value, arg - 1, _du_dst, _du_other, len(const_stack)))
 
             if __INTERNAL__DEBUG_LOG:
                 log.write("DEBUG => %s\n" % opcode_value)
@@ -859,6 +983,92 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None, globals_frame=
 
             if __INTERNAL__DEBUG_LOG:
                 log.write("DEBUG => BUILD_TUPLE %d\n" % arg)
+
+        elif opcode_value == 'UNPACK_SEQUENCE':
+            # Pop TOS sequence, push its items right-to-left so TOS is item 0.
+            _us_seq = list(const_stack.pop(0))
+            _us_i = len(_us_seq) - 1
+            while _us_i >= 0:
+                const_stack.insert(0, _us_seq[_us_i])
+                _us_i -= 1
+
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => UNPACK_SEQUENCE %d\n" % arg)
+
+        elif opcode_value == 'IS_OP':
+            # IS_OP(invert): TOS1 is TOS → push bool; invert=1 means "is not".
+            _io_b = const_stack.pop(0)
+            _io_a = const_stack.pop(0)
+            _io_result = (_io_a is not _io_b) if arg else (_io_a is _io_b)
+            const_stack.insert(0, _io_result)
+
+        elif opcode_value == 'CONTAINS_OP':
+            # CONTAINS_OP(invert): TOS1 in TOS → push bool; invert=1 means "not in".
+            _co_container = const_stack.pop(0)
+            _co_item = const_stack.pop(0)
+            try:
+                _co_result = (_co_item not in _co_container) if arg else (_co_item in _co_container)
+            except TypeError:
+                _co_result = False
+            const_stack.insert(0, _co_result)
+
+        elif opcode_value == 'STORE_SUBSCR':
+            # TOS1[TOS] = TOS2; pops all three.
+            _ss_key = const_stack.pop(0)
+            _ss_obj = const_stack.pop(0)
+            _ss_val = const_stack.pop(0)
+            _ss_obj[_ss_key] = _ss_val
+
+        elif opcode_value == 'DELETE_SUBSCR':
+            # del TOS1[TOS]; pops both.
+            _ds_key = const_stack.pop(0)
+            _ds_obj = const_stack.pop(0)
+            del _ds_obj[_ds_key]
+
+        elif opcode_value == 'DELETE_FAST':
+            _df_name = bytecode.co_varnames[arg]
+            fast_dict.pop(_df_name, None)
+
+        elif opcode_value == 'KW_NAMES':
+            # Store keyword argument names for the next CALL opcode.
+            _kw_names = bytecode.co_consts[arg]
+
+        elif opcode_value == 'FORMAT_VALUE':
+            # f-string value slot: arg encodes conversion + whether format spec present.
+            _fv_have_spec = bool(arg & 0x04)
+            _fv_conv = arg & 0x03
+            _fv_spec = const_stack.pop(0) if _fv_have_spec else ''
+            _fv_val = const_stack.pop(0)
+            if _fv_conv == 1:
+                _fv_val = str(_fv_val)
+            elif _fv_conv == 2:
+                _fv_val = repr(_fv_val)
+            elif _fv_conv == 3:
+                _fv_val = ascii(_fv_val)
+            const_stack.insert(0, format(_fv_val, _fv_spec))
+
+        elif opcode_value == 'BUILD_STRING':
+            # Concatenate arg strings from the stack.
+            _bstr_parts = []
+            _bstr_n = arg
+            while _bstr_n > 0:
+                _bstr_parts.insert(0, const_stack.pop(0))
+                _bstr_n -= 1
+            const_stack.insert(0, ''.join(_bstr_parts))
+
+        elif opcode_value == 'CALL_FUNCTION_EX':
+            # CALL_FUNCTION_EX(flags): call func(*args[, **kwargs]).
+            _cfex_kwargs = const_stack.pop(0) if (arg & 0x01) else {}
+            _cfex_args = const_stack.pop(0)
+            _cfex_func = const_stack.pop(0)
+            if const_stack and const_stack[0] is None:
+                const_stack.pop(0)  # pop NULL sentinel
+            try:
+                const_stack.insert(0, _cfex_func(*_cfex_args, **_cfex_kwargs))
+            except Exception as _cfex_exc:
+                log.write("ERROR => CALL_FUNCTION_EX failed: %s\n" % _cfex_exc)
+                const_stack.insert(0, None)
+
 
         elif opcode_value == 'POP_JUMP_BACKWARD_IF_TRUE':
             tos = const_stack.pop(0)
@@ -892,16 +1102,64 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None, globals_frame=
             if __INTERNAL__DEBUG_LOG:
                 log.write("DEBUG => POP_JUMP_FORWARD_IF_NOT_NONE: tos=%s target=%s\n" % (tos, arg))
 
-        elif opcode_value in ('PUSH_EXC_INFO', 'POP_EXCEPT', 'CHECK_EXC_MATCH',
-                              'COPY', 'RERAISE'):
-            # Minimal exception-handling stubs — just discard the exception data
-            # so execution can continue on the happy path.
+        elif opcode_value == 'PUSH_EXC_INFO':
+            # Pushes the caught exception; saves previous exception state (we use None).
+            _pei_exc = const_stack.pop(0)
+            const_stack.insert(0, None)      # placeholder for previous exception
+            const_stack.insert(0, _pei_exc)  # caught exception back at TOS
             if __INTERNAL__DEBUG_LOG:
-                log.write("DEBUG => exc-handling stub: %s\n" % opcode_value)
+                log.write("DEBUG => PUSH_EXC_INFO\n")
+
+        elif opcode_value == 'CHECK_EXC_MATCH':
+            # Pops TOS (exception type), checks TOS1 (exception), pushes bool.
+            _cem_types = const_stack.pop(0)
+            _cem_exc = const_stack[0]  # stays on stack
+            try:
+                _cem_result = isinstance(_cem_exc, _cem_types)
+            except TypeError:
+                _cem_result = False
+            const_stack.insert(0, _cem_result)
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => CHECK_EXC_MATCH: %s\n" % _cem_result)
+
+        elif opcode_value == 'POP_EXCEPT':
+            # Pops the saved previous-exception placeholder pushed by PUSH_EXC_INFO.
+            if const_stack:
+                const_stack.pop(0)
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => POP_EXCEPT\n")
+
+        elif opcode_value == 'COPY':
+            # COPY(i): push a copy of STACK[-i] (1-indexed) to TOS.
+            if arg > 0 and arg <= len(const_stack):
+                const_stack.insert(0, const_stack[arg - 1])
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => COPY %d\n" % arg)
+
+        elif opcode_value == 'RERAISE':
+            # Re-raise the current exception from TOS (if it is one).
+            if const_stack and isinstance(const_stack[0], BaseException):
+                raise const_stack[0]
+            if __INTERNAL__DEBUG_LOG:
+                log.write("DEBUG => RERAISE\n")
 
         elif opcode_value == 'LOAD_ATTR':
             math0 = const_stack.pop(0)
-            const_stack.insert(0, math0.__getattribute__(bytecode.co_names[arg]))
+            try:
+                const_stack.insert(0, getattr(math0, bytecode.co_names[arg]))
+            except Exception as _la_exc:
+                _la_handled = False
+                for _et_s, _et_e, _et_t, _et_d in _exc_table:
+                    if _et_s <= _cur_offset < _et_e:
+                        while len(const_stack) > _et_d:
+                            const_stack.pop(0)
+                        const_stack.insert(0, _la_exc)
+                        i = offset_to_index.get(_et_t, i) - 1
+                        _la_handled = True
+                        break
+                if not _la_handled:
+                    log.write("ERROR => LOAD_ATTR %s failed: %s\n" % (bytecode.co_names[arg], _la_exc))
+                    const_stack.insert(0, None)
 
         elif opcode_value == 'MAKE_FUNCTION':
             # Stack layout at MAKE_FUNCTION (from TOS down):
@@ -911,12 +1169,12 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None, globals_frame=
             #   TOS-3: kwonly defaults dict (if bit 0x02)
             #   TOS-4: positional defaults  (if bit 0x01, pushed first = deepest)
             _mf_code = const_stack.pop(0)   # code object is always at TOS
-            if arg & 0x08: const_stack.pop(0)   # closure (free-var cell tuple)
+            _mf_closure = const_stack.pop(0) if arg & 0x08 else None
             if arg & 0x04: const_stack.pop(0)   # annotations dict
             if arg & 0x02: const_stack.pop(0)   # kwonly defaults dict
             # Capture positional defaults so the callable can apply them correctly.
             _mf_defs = const_stack.pop(0) if arg & 0x01 else ()
-            const_stack.insert(0, _mf_make(_mf_code, globals_frame, _mf_defs))
+            const_stack.insert(0, _mf_make(_mf_code, globals_frame, _mf_defs, _mf_closure))
 
         elif opcode_value == 'CALL_FUNCTION':
             argc = arg & 0xff
@@ -963,8 +1221,11 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None, globals_frame=
                     if func.__name__ == '__build_class__' and args_list:
                         _cb = args_list[0]
                         try:
-                            _cb_code = _cb.__closure__[0].cell_contents
-                            _cb_gf = _cb.__closure__[2].cell_contents
+                            # Locate _co and _gf by name in co_freevars to be
+                            # robust against future changes to _mf_make's params.
+                            _fv = list(_cb.__code__.co_freevars)
+                            _cb_code = _cb.__closure__[_fv.index('_co')].cell_contents
+                            _cb_gf = _cb.__closure__[_fv.index('_gf')].cell_contents
                             args_list[0] = py2vm.__class__(_cb_code, _cb_gf)
                         except Exception:
                             pass
@@ -980,7 +1241,8 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None, globals_frame=
         elif opcode_value == 'CALL':
             # Python 3.11 CALL opcode: like CALL_FUNCTION but stack also has a
             # NULL sentinel below the callable (pushed by PUSH_NULL).
-            argc = arg  # no kwargs encoding in Python 3.11 CALL
+            # KW_NAMES may have provided keyword-argument names for this call.
+            argc = arg  # total argument count (positional + keyword)
 
             args_list = []
             count = argc
@@ -992,6 +1254,15 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None, globals_frame=
             # Pop the NULL sentinel pushed by PUSH_NULL (or self for method calls)
             if const_stack:
                 const_stack.pop(0)
+
+            # Split off keyword arguments if KW_NAMES was set.
+            if _kw_names:
+                _call_nkw = len(_kw_names)
+                _call_kwargs = dict(zip(_kw_names, args_list[-_call_nkw:]))
+                args_list = args_list[:-_call_nkw]
+                _kw_names = ()
+            else:
+                _call_kwargs = {}
 
             try:
                 func.co_code  # probe for VM code object
@@ -1017,15 +1288,17 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None, globals_frame=
                     if func.__name__ == '__build_class__' and args_list:
                         _cb = args_list[0]
                         try:
-                            _cb_code = _cb.__closure__[0].cell_contents
-                            _cb_gf = _cb.__closure__[2].cell_contents
+                            # Look up _co and _gf by name in co_freevars.
+                            _fv = list(_cb.__code__.co_freevars)
+                            _cb_code = _cb.__closure__[_fv.index('_co')].cell_contents
+                            _cb_gf = _cb.__closure__[_fv.index('_gf')].cell_contents
                             args_list[0] = py2vm.__class__(_cb_code, _cb_gf)
                         except Exception:
                             pass
                 except AttributeError:
                     pass
                 try:
-                    result = func(*args_list)
+                    result = func(*args_list, **_call_kwargs)
                     const_stack.insert(0, result)
                 except Exception as e:
                     log.write("ERROR => could not CALL %s: %s\n" % (func, e))
