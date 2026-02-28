@@ -139,6 +139,7 @@ def bytecode_optimize(bytecode):
     i = 0
     index_counter = 0
     extended_arg = 0  # accumulator for EXTENDED_ARG prefix in wordcode mode
+    pending_ext_offsets = []  # EXTENDED_ARG offsets waiting to be mapped
     while True:
         try:
             opcode_byte = code[i]
@@ -157,8 +158,11 @@ def bytecode_optimize(bytecode):
                 continue
             opcode_value = OPNAME[opcode_byte]
             if opcode_value == 'EXTENDED_ARG':
-                # Accumulate high bits for the next instruction's arg
+                # Accumulate high bits for the next instruction's arg.
+                # Save the offset so jump targets that land here map to
+                # the following real instruction.
                 extended_arg = (extended_arg | arg) << 8
+                pending_ext_offsets.append(offset)
                 continue
             arg = extended_arg | arg
             extended_arg = 0
@@ -188,6 +192,11 @@ def bytecode_optimize(bytecode):
                     arg = i + arg
             else:
                 arg = 0
+        # Map any preceding EXTENDED_ARG offsets to this instruction's index
+        # so that jump targets pointing to an EXTENDED_ARG site resolve correctly.
+        for _ext_off in pending_ext_offsets:
+            offset_to_index[_ext_off] = index_counter
+        pending_ext_offsets = []
         offset_to_index[offset] = index_counter
         bytecode_list.append([opcode_value, arg])
         index_counter += 1
@@ -226,9 +235,20 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None, globals_frame=
     # Factory: create a real callable that runs a code object through the VM.
     # Using a factory rather than a bare closure ensures each call captures its
     # own _co/_gf values rather than sharing a reference to the loop variable.
-    def _mf_make(_co, _gf):
+    def _mf_make(_co, _gf, _defaults=()):
         def _mf_callable(*_args):
             _fl = {}
+            # Apply default values first so all parameters have correct defaults.
+            # _defaults is the positional-defaults tuple captured at MAKE_FUNCTION
+            # time (Python stores defaults on the function, not the code object).
+            _num_params = _co.co_argcount
+            _num_defaults = len(_defaults)
+            _first_default = _num_params - _num_defaults
+            _di = 0
+            while _di < _num_defaults:
+                _fl[_co.co_varnames[_first_default + _di]] = _defaults[_di]
+                _di += 1
+            # Apply provided positional args, overriding any defaults.
             _idx = 0
             for _val in _args:
                 try:
@@ -236,7 +256,11 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None, globals_frame=
                 except IndexError:
                     pass
                 _idx += 1
-            _rs, _ignored = py2vm(_co, [], False, fast_locals=_fl, globals_frame=_gf)
+            _rs, _ig = py2vm(_co, [], False, fast_locals=_fl, globals_frame=_gf)
+            if _co.co_name in ('buildcode', 'py2vm'):
+                import sys as _sys
+                _sys.stderr.write('TRACE _mf_callable(%s): _rs=%r err=%s\n' % (
+                    _co.co_name, _rs[:1] if _rs else [], _ig.getvalue()[-400:] if hasattr(_ig, 'getvalue') else ''))
             return _rs[0] if _rs else None
         return _mf_callable
 
@@ -880,14 +904,19 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None, globals_frame=
             const_stack.insert(0, math0.__getattribute__(bytecode.co_names[arg]))
 
         elif opcode_value == 'MAKE_FUNCTION':
-            # Consume any extras that were pushed below the code object,
-            # ordered high-bit to low-bit (closure, annotations, kw defaults, defaults).
+            # Stack layout at MAKE_FUNCTION (from TOS down):
+            #   TOS:   code object          (pushed last)
+            #   TOS-1: closure tuple        (if bit 0x08)
+            #   TOS-2: annotations dict     (if bit 0x04)
+            #   TOS-3: kwonly defaults dict (if bit 0x02)
+            #   TOS-4: positional defaults  (if bit 0x01, pushed first = deepest)
+            _mf_code = const_stack.pop(0)   # code object is always at TOS
             if arg & 0x08: const_stack.pop(0)   # closure (free-var cell tuple)
             if arg & 0x04: const_stack.pop(0)   # annotations dict
             if arg & 0x02: const_stack.pop(0)   # kwonly defaults dict
-            if arg & 0x01: const_stack.pop(0)   # positional defaults tuple
-            _mf_code = const_stack.pop(0)
-            const_stack.insert(0, _mf_make(_mf_code, globals_frame))
+            # Capture positional defaults so the callable can apply them correctly.
+            _mf_defs = const_stack.pop(0) if arg & 0x01 else ()
+            const_stack.insert(0, _mf_make(_mf_code, globals_frame, _mf_defs))
 
         elif opcode_value == 'CALL_FUNCTION':
             argc = arg & 0xff
@@ -935,7 +964,7 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None, globals_frame=
                         _cb = args_list[0]
                         try:
                             _cb_code = _cb.__closure__[0].cell_contents
-                            _cb_gf = _cb.__closure__[1].cell_contents
+                            _cb_gf = _cb.__closure__[2].cell_contents
                             args_list[0] = py2vm.__class__(_cb_code, _cb_gf)
                         except Exception:
                             pass
@@ -989,7 +1018,7 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None, globals_frame=
                         _cb = args_list[0]
                         try:
                             _cb_code = _cb.__closure__[0].cell_contents
-                            _cb_gf = _cb.__closure__[1].cell_contents
+                            _cb_gf = _cb.__closure__[2].cell_contents
                             args_list[0] = py2vm.__class__(_cb_code, _cb_gf)
                         except Exception:
                             pass
@@ -1037,14 +1066,17 @@ def run_script(path):
         _VM_EXEC_DEPTH -= 1
 
 
-_argv = __import__('sys').argv
-try:
-    _script = _argv[1]
-except IndexError:
-    _script = None
+_sys = __import__('sys')
+_argv_all = _sys.argv
+_script = _argv_all[1] if _argv_all.__len__() > 1 else None
 
 if _script is not None:
+    # Shift sys.argv by one so the inner VM sees only one arg and
+    # takes the else branch (running the built-in test) rather than
+    # trying to recurse into run_script again.
+    _sys.argv = _argv_all[1:]
     print(run_script(_script))
+    _sys.argv = _argv_all  # restore
 else:
     code = """
 __INTERNAL__DEBUG_LOG=1
