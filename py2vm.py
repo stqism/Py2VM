@@ -1,6 +1,6 @@
 # Py2VM — Python 3.11 bytecode interpreter with explicit frame stack.
-# Targets CPython 3.11 unspecialized bytecode (Tiers 1-5).
-# Generator/async opcodes (Tier 6) are explicitly rejected.
+# Targets CPython 3.11 unspecialized bytecode (Tiers 1-6).
+# Supports generators, coroutines, async generators, and all async opcodes.
 
 import dis as _dis_mod
 import types as _types_mod
@@ -11,6 +11,18 @@ import weakref as _weakref_mod
 # ---------------------------------------------------------------------------
 _NULL = object()   # PUSH_NULL sentinel — distinct from Python None
 _UNSET = object()  # Uninitialized fast-local slot
+_YIELD = object()  # Signal from _run_frames: generator yielded
+
+
+# ---------------------------------------------------------------------------
+# Async generator wrapped value marker
+# ---------------------------------------------------------------------------
+class _AsyncGenWrappedValue:
+    """Wraps a yielded value inside an async generator so the protocol
+    can distinguish yields from returns."""
+    __slots__ = ('value',)
+    def __init__(self, value):
+        self.value = value
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +214,361 @@ def _bind_args(frame, vmfunc, args, kwargs):
 
 
 # ---------------------------------------------------------------------------
+# Generator / Coroutine / AsyncGenerator objects
+# ---------------------------------------------------------------------------
+class VMGenerator:
+    """Generator object — wraps a suspended Frame for resumable execution."""
+
+    def __init__(self, frame, builtins, log):
+        self._frame = frame
+        self._builtins = builtins
+        self._log = log
+        self._started = False
+        self._closed = False
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return self.send(None)
+
+    def send(self, value):
+        if self._closed:
+            raise StopIteration
+        if not self._started:
+            if value is not None:
+                raise TypeError(
+                    "can't send non-None value to a just-started generator")
+            self._started = True
+        self._frame.stack.append(value)
+        result, signal = _run_frames([self._frame], self._builtins, self._log)
+        if signal is _YIELD:
+            return result
+        self._closed = True
+        raise StopIteration(result)
+
+    def throw(self, typ, val=None, tb=None):
+        if self._closed:
+            raise StopIteration
+        exc = typ if isinstance(typ, BaseException) else (
+            typ(val) if val is not None else typ())
+
+        # If in yield-from: sub-iterator is on top of stack
+        stk = self._frame.stack
+        if stk and hasattr(stk[-1], 'throw'):
+            sub = stk[-1]
+            try:
+                result = sub.throw(type(exc), exc)
+                return result
+            except StopIteration as e:
+                stk.pop()
+                stk.append(e.value)
+                # Find SEND instruction to get its jump target
+                for i in range(self._frame.ip - 1, -1, -1):
+                    if self._frame.instructions[i][0] == 'SEND':
+                        target = self._frame.argvals[i]
+                        self._frame.ip = self._frame.offset_to_index[target]
+                        break
+                result, signal = _run_frames(
+                    [self._frame], self._builtins, self._log)
+                if signal is _YIELD:
+                    return result
+                self._closed = True
+                raise StopIteration(result)
+            except BaseException:
+                stk.pop()
+                raise
+
+        # Normal throw: find exception handler via exception table
+        f = self._frame
+        # Offset of the yield point (instruction before current ip)
+        yield_offset = 0
+        for i in range(f.ip - 1, -1, -1):
+            if f.instructions[i][0] in ('YIELD_VALUE', 'RETURN_GENERATOR'):
+                yield_offset = f.instructions[i][2]
+                break
+
+        handled = False
+        for entry in f.exc_table:
+            start, end, target, depth = entry[:4]
+            lasti = entry[4] if len(entry) > 4 else False
+            if start <= yield_offset < end:
+                while len(stk) > depth:
+                    stk.pop()
+                if lasti:
+                    stk.append(yield_offset)
+                stk.append(exc)
+                f.ip = f.offset_to_index.get(target, f.ip)
+                handled = True
+                break
+
+        if handled:
+            result, signal = _run_frames(
+                [self._frame], self._builtins, self._log)
+            if signal is _YIELD:
+                return result
+            self._closed = True
+            raise StopIteration(result)
+        else:
+            self._closed = True
+            raise exc
+
+    def close(self):
+        if self._closed:
+            return
+        try:
+            self.throw(GeneratorExit)
+        except (GeneratorExit, StopIteration):
+            self._closed = True
+            return
+        except BaseException:
+            self._closed = True
+            raise
+        self._closed = True
+
+
+class VMCoroutine:
+    """Coroutine object — wraps a suspended Frame (async def)."""
+
+    def __init__(self, frame, builtins, log):
+        self._frame = frame
+        self._builtins = builtins
+        self._log = log
+        self._started = False
+        self._closed = False
+
+    def __await__(self):
+        return self
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return self.send(None)
+
+    def send(self, value):
+        if self._closed:
+            raise StopIteration
+        if not self._started:
+            if value is not None:
+                raise TypeError(
+                    "can't send non-None value to a just-started coroutine")
+            self._started = True
+        self._frame.stack.append(value)
+        result, signal = _run_frames([self._frame], self._builtins, self._log)
+        if signal is _YIELD:
+            return result
+        self._closed = True
+        raise StopIteration(result)
+
+    def throw(self, typ, val=None, tb=None):
+        if self._closed:
+            raise StopIteration
+        exc = typ if isinstance(typ, BaseException) else (
+            typ(val) if val is not None else typ())
+
+        stk = self._frame.stack
+        if stk and hasattr(stk[-1], 'throw'):
+            sub = stk[-1]
+            try:
+                result = sub.throw(type(exc), exc)
+                return result
+            except StopIteration as e:
+                stk.pop()
+                stk.append(e.value)
+                for i in range(self._frame.ip - 1, -1, -1):
+                    if self._frame.instructions[i][0] == 'SEND':
+                        target = self._frame.argvals[i]
+                        self._frame.ip = self._frame.offset_to_index[target]
+                        break
+                result, signal = _run_frames(
+                    [self._frame], self._builtins, self._log)
+                if signal is _YIELD:
+                    return result
+                self._closed = True
+                raise StopIteration(result)
+            except BaseException:
+                stk.pop()
+                raise
+
+        f = self._frame
+        yield_offset = 0
+        for i in range(f.ip - 1, -1, -1):
+            if f.instructions[i][0] in ('YIELD_VALUE', 'RETURN_GENERATOR'):
+                yield_offset = f.instructions[i][2]
+                break
+
+        handled = False
+        for entry in f.exc_table:
+            start, end, target, depth = entry[:4]
+            lasti = entry[4] if len(entry) > 4 else False
+            if start <= yield_offset < end:
+                while len(stk) > depth:
+                    stk.pop()
+                if lasti:
+                    stk.append(yield_offset)
+                stk.append(exc)
+                f.ip = f.offset_to_index.get(target, f.ip)
+                handled = True
+                break
+
+        if handled:
+            result, signal = _run_frames(
+                [self._frame], self._builtins, self._log)
+            if signal is _YIELD:
+                return result
+            self._closed = True
+            raise StopIteration(result)
+        else:
+            self._closed = True
+            raise exc
+
+    def close(self):
+        if self._closed:
+            return
+        try:
+            self.throw(GeneratorExit)
+        except (GeneratorExit, StopIteration):
+            self._closed = True
+            return
+        except BaseException:
+            self._closed = True
+            raise
+        self._closed = True
+
+
+class VMAsyncGenASend:
+    """Awaitable returned by async generator's __anext__/asend.
+    Drives the async generator frame one step."""
+
+    def __init__(self, async_gen, value):
+        self._gen = async_gen
+        self._value = value
+
+    def __await__(self):
+        return self
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return self.send(None)
+
+    def send(self, value):
+        gen = self._gen
+        if gen._closed:
+            raise StopAsyncIteration
+        if not gen._started:
+            gen._started = True
+            send_val = None
+        else:
+            send_val = value if self._value is None else self._value
+            self._value = None  # only use once
+        gen._frame.stack.append(send_val)
+        result, signal = _run_frames(
+            [gen._frame], gen._builtins, gen._log)
+        if signal is _YIELD:
+            if isinstance(result, _AsyncGenWrappedValue):
+                # Async gen yielded — completes the __anext__ awaitable
+                raise StopIteration(result.value)
+            # Non-wrapped yield: re-yield for await delegation
+            return result
+        # Generator returned — means StopAsyncIteration
+        gen._closed = True
+        raise StopAsyncIteration
+
+    def throw(self, typ, val=None, tb=None):
+        return self._gen.athrow(typ, val, tb).send(None)
+
+
+class VMAsyncGenAThrow:
+    """Awaitable returned by async generator's athrow/aclose."""
+
+    def __init__(self, async_gen, typ, val):
+        self._gen = async_gen
+        self._typ = typ
+        self._val = val
+
+    def __await__(self):
+        return self
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return self.send(None)
+
+    def send(self, value):
+        gen = self._gen
+        if gen._closed:
+            raise StopAsyncIteration
+        exc = self._typ if isinstance(self._typ, BaseException) else (
+            self._typ(self._val) if self._val is not None else self._typ())
+
+        f = gen._frame
+        stk = f.stack
+
+        yield_offset = 0
+        for i in range(f.ip - 1, -1, -1):
+            if f.instructions[i][0] in ('YIELD_VALUE', 'RETURN_GENERATOR'):
+                yield_offset = f.instructions[i][2]
+                break
+
+        handled = False
+        for entry in f.exc_table:
+            start, end, target, depth = entry[:4]
+            lasti = entry[4] if len(entry) > 4 else False
+            if start <= yield_offset < end:
+                while len(stk) > depth:
+                    stk.pop()
+                if lasti:
+                    stk.append(yield_offset)
+                stk.append(exc)
+                f.ip = f.offset_to_index.get(target, f.ip)
+                handled = True
+                break
+
+        if handled:
+            result, signal = _run_frames(
+                [gen._frame], gen._builtins, gen._log)
+            if signal is _YIELD:
+                if isinstance(result, _AsyncGenWrappedValue):
+                    raise StopIteration(result.value)
+                return result
+            gen._closed = True
+            raise StopAsyncIteration
+        else:
+            gen._closed = True
+            raise exc
+
+
+class VMAsyncGenerator:
+    """Async generator object — wraps a suspended Frame (async def + yield)."""
+
+    def __init__(self, frame, builtins, log):
+        self._frame = frame
+        self._builtins = builtins
+        self._log = log
+        self._started = False
+        self._closed = False
+
+    def __aiter__(self):
+        return self
+
+    def __anext__(self):
+        return VMAsyncGenASend(self, None)
+
+    def asend(self, value):
+        return VMAsyncGenASend(self, value)
+
+    def athrow(self, typ, val=None, tb=None):
+        return VMAsyncGenAThrow(self, typ, val)
+
+    def aclose(self):
+        return VMAsyncGenAThrow(self, GeneratorExit, None)
+
+
+# ---------------------------------------------------------------------------
 # BINARY_OP dispatch table (Python 3.11)
 # Regular: 0=+ 1=& 2=// 3=<< 5=* 6=% 7=| 8=** 9=>> 10=- 11=/ 12=^
 # Inplace: add 13 to regular arg
@@ -225,49 +592,15 @@ def _binary_op(op_arg, a, b):
 
 
 # ---------------------------------------------------------------------------
-# Tier 6 rejection set
+# Main interpreter loop (extracted for generator/coroutine reuse)
 # ---------------------------------------------------------------------------
-_TIER6_OPCODES = frozenset({
-    'RETURN_GENERATOR', 'YIELD_VALUE', 'SEND', 'GET_YIELD_FROM_ITER',
-    'GET_AWAITABLE', 'ASYNC_GEN_WRAP', 'BEFORE_ASYNC_WITH',
-    'END_ASYNC_FOR', 'SETUP_ANNOTATIONS',
-})
+def _run_frames(frames, builtins, log):
+    """Run the frame stack until return or yield.
 
-
-# ---------------------------------------------------------------------------
-# Main interpreter
-# ---------------------------------------------------------------------------
-def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None,
-          globals_frame=None):
-
-    if rec_log is not False and rec_log:
-        log = rec_log
-    else:
-        log = _StringIO()
-        log.write('py2vm output:\n')
-
-    builtins = _get_builtins()
-    globals_dict = (globals_frame if globals_frame is not None
-                    else {'__builtins__': __builtins__})
-
-    # Build initial frame
-    frame0 = Frame(bytecode, globals_dict, builtins)
-    if fast_locals:
-        for name, val in fast_locals.items():
-            if name == '__closure__':
-                continue
-            try:
-                idx = list(frame0.code.co_varnames).index(name)
-                frame0.locals_fast[idx] = val
-            except ValueError:
-                pass
-        # Handle closure cells passed via fast_locals
-        closure = fast_locals.get('__closure__')
-        if closure is not None:
-            for ci in range(min(len(closure), len(frame0.freevars))):
-                frame0.freevars[ci] = closure[ci]
-
-    frames = [frame0]
+    Returns (value, signal):
+      signal is None  → normal return, value is the final return value
+      signal is _YIELD → generator yielded, value is the yielded value
+    """
     final_retval = None
 
     while frames:
@@ -283,13 +616,6 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None,
         argval = f.argvals[f.ip]
         f.ip += 1
         stk = f.stack
-
-        # ---------------------------------------------------------------
-        # Tier 6 rejection
-        # ---------------------------------------------------------------
-        if opname in _TIER6_OPCODES:
-            raise NotImplementedError(
-                "Generator/async opcode not supported: %s" % opname)
 
         try:  # __exc_handler__
 
@@ -1114,6 +1440,80 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None,
                 continue
 
             # ---------------------------------------------------------------
+            # Tier 6: Generator / Coroutine / Async opcodes
+            # ---------------------------------------------------------------
+            elif opname == 'RETURN_GENERATOR':
+                gen_frame = frames.pop()
+                flags = gen_frame.code.co_flags
+                if flags & 0x200:        # CO_ASYNC_GENERATOR
+                    obj = VMAsyncGenerator(gen_frame, builtins, log)
+                elif flags & 0x80:       # CO_COROUTINE
+                    obj = VMCoroutine(gen_frame, builtins, log)
+                else:                    # CO_GENERATOR (0x20)
+                    obj = VMGenerator(gen_frame, builtins, log)
+                if frames:
+                    frames[-1].stack.append(obj)
+                else:
+                    final_retval = obj
+                continue
+
+            elif opname == 'YIELD_VALUE':
+                yielded = stk.pop()
+                return (yielded, _YIELD)
+
+            elif opname == 'SEND':
+                value = stk.pop()       # sent value (TOS)
+                sub_iter = stk[-1]      # sub-iterator (TOS1, peek)
+                try:
+                    if value is None:
+                        result = next(sub_iter)
+                    else:
+                        result = sub_iter.send(value)
+                    stk.append(result)   # falls through to YIELD_VALUE
+                except StopIteration as _si:
+                    stk.pop()            # remove sub-iterator
+                    stk.append(_si.value)
+                    f.ip = f.offset_to_index[argval]
+
+            elif opname == 'GET_YIELD_FROM_ITER':
+                iterable = stk[-1]
+                if not isinstance(iterable,
+                                  (VMGenerator, VMCoroutine)):
+                    stk[-1] = iter(iterable)
+
+            elif opname == 'GET_AWAITABLE':
+                obj = stk[-1]
+                if isinstance(obj, VMCoroutine):
+                    pass  # already its own await-iterator
+                elif hasattr(obj, '__await__'):
+                    stk[-1] = obj.__await__()
+
+            elif opname == 'ASYNC_GEN_WRAP':
+                stk[-1] = _AsyncGenWrappedValue(stk[-1])
+
+            elif opname == 'GET_AITER':
+                stk[-1] = stk[-1].__aiter__()
+
+            elif opname == 'GET_ANEXT':
+                stk.append(stk[-1].__anext__())
+
+            elif opname == 'BEFORE_ASYNC_WITH':
+                mgr = stk[-1]
+                exit_method = mgr.__aexit__
+                stk[-1] = exit_method
+                stk.append(mgr.__aenter__())
+
+            elif opname == 'END_ASYNC_FOR':
+                exc = stk.pop()
+                stk.pop()  # remove async iterator
+                if not isinstance(exc, StopAsyncIteration):
+                    raise exc
+
+            elif opname == 'SETUP_ANNOTATIONS':
+                if '__annotations__' not in f.globals:
+                    f.globals['__annotations__'] = {}
+
+            # ---------------------------------------------------------------
             # Unknown opcode
             # ---------------------------------------------------------------
             else:
@@ -1136,6 +1536,44 @@ def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None,
                     break
             if not _exc_handled:
                 raise
+
+    return (final_retval, None)
+
+
+# ---------------------------------------------------------------------------
+# Main interpreter (thin wrapper around _run_frames)
+# ---------------------------------------------------------------------------
+def py2vm(bytecode, stack=False, rec_log=False, fast_locals=None,
+          globals_frame=None):
+
+    if rec_log is not False and rec_log:
+        log = rec_log
+    else:
+        log = _StringIO()
+        log.write('py2vm output:\n')
+
+    builtins = _get_builtins()
+    globals_dict = (globals_frame if globals_frame is not None
+                    else {'__builtins__': __builtins__})
+
+    # Build initial frame
+    frame0 = Frame(bytecode, globals_dict, builtins)
+    if fast_locals:
+        for name, val in fast_locals.items():
+            if name == '__closure__':
+                continue
+            try:
+                idx = list(frame0.code.co_varnames).index(name)
+                frame0.locals_fast[idx] = val
+            except ValueError:
+                pass
+        closure = fast_locals.get('__closure__')
+        if closure is not None:
+            for ci in range(min(len(closure), len(frame0.freevars))):
+                frame0.freevars[ci] = closure[ci]
+
+    frames = [frame0]
+    final_retval, _signal = _run_frames(frames, builtins, log)
 
     # Return value handling — maintain backward compatibility
     if stack is not False:
@@ -1171,6 +1609,20 @@ def run_script(path):
         return buildcode(src)
     finally:
         _VM_EXEC_DEPTH -= 1
+
+
+def vm_run(coro):
+    """Minimal coroutine driver — run a coroutine to completion.
+
+    Analogous to asyncio.run() but without real I/O scheduling.
+    Works for coroutines that don't actually suspend on I/O.
+    """
+    value = None
+    while True:
+        try:
+            value = coro.send(value)
+        except StopIteration as e:
+            return e.value
 
 
 # ---------------------------------------------------------------------------
