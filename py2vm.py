@@ -1,11 +1,12 @@
 # Py2VM — Python 3.11 bytecode interpreter with explicit frame stack.
 # Targets CPython 3.11 unspecialized bytecode (Tiers 1-6).
 # Supports generators, coroutines, async generators, and all async opcodes.
+# Includes a bytecode optimizer that produces an internal IR for execution.
 
-import dis as _dis_mod
-import opcode as _opcode_mod
 import types as _types_mod
-import weakref as _weakref_mod
+
+# Import the optimizer module (canonical IR, CFG, peephole, superinstructions)
+import optimizer as _opt
 
 # ---------------------------------------------------------------------------
 # Sentinels
@@ -48,79 +49,46 @@ class _StringIO:
 
 
 # ---------------------------------------------------------------------------
-# Specialized → base opcode mapping (CPython 3.11+ adaptive interpreter)
+# Optimizer configuration
 # ---------------------------------------------------------------------------
-_SPECIALIZED_TO_BASE = {}
-try:
-    _base_opnames = set(_opcode_mod.opname)
-    for _spec in getattr(_opcode_mod, '_specialized_instructions', []):
-        _best = None
-        for _base in _base_opnames:
-            if _spec.startswith(_base) and (not _best or len(_base) > len(_best)):
-                _best = _base
-        if _best:
-            _SPECIALIZED_TO_BASE[_spec] = _best
-except Exception:
-    pass
-
-# ---------------------------------------------------------------------------
-# Bytecode decode cache (WeakKeyDictionary — auto-evicts when code object dies)
-# ---------------------------------------------------------------------------
-_DECODE_CACHE = _weakref_mod.WeakKeyDictionary()
-_DECODE_HITS = 0
-_DECODE_MISSES = 0
+_OPT_LEVEL = 2  # Default optimization level (0=none, 1=peephole+CFG, 2=+superinstructions)
 
 
-def _decode_uncached(code):
-    """Build the full decode payload for a code object (not cached).
-
-    Returns (instructions, offset_to_index, argvals, exc_table).
-    instructions: list of (opname, arg, offset) tuples.
-    offset_to_index: dict mapping byte offset -> instruction index.
-    argvals: list of resolved argval per instruction (for jump targets).
-    exc_table: list of (start, end, target, depth) tuples.
-    """
-    raw = list(_dis_mod.get_instructions(code, adaptive=True,
-                                         show_caches=True))
-    instructions = []
-    offset_to_index = {}
-    argvals = []
-    for instr in raw:
-        if instr.opname == 'CACHE':
-            continue
-        idx = len(instructions)
-        offset_to_index[instr.offset] = idx
-        opname = _SPECIALIZED_TO_BASE.get(instr.opname, instr.opname)
-        arg = instr.arg if instr.arg is not None else 0
-        instructions.append((opname, arg, instr.offset))
-        argvals.append(instr.argval)
-    exc_table = []
-    if hasattr(code, 'co_exceptiontable') and code.co_exceptiontable:
-        try:
-            for entry in _dis_mod._parse_exception_table(code):
-                exc_table.append((entry.start, entry.end, entry.target, entry.depth,
-                                  getattr(entry, 'lasti', False)))
-        except Exception:
-            pass
-    return (instructions, offset_to_index, argvals, exc_table)
+def set_opt_level(level):
+    """Set the VM optimization level (0, 1, or 2)."""
+    global _OPT_LEVEL
+    _OPT_LEVEL = level
 
 
-def decode_cached(code):
-    """Return cached (instructions, offset_to_index, argvals, exc_table)."""
-    global _DECODE_HITS, _DECODE_MISSES
-    hit = _DECODE_CACHE.get(code)
-    if hit is not None:
-        _DECODE_HITS += 1
-        return hit
-    _DECODE_MISSES += 1
-    payload = _decode_uncached(code)
-    _DECODE_CACHE[code] = payload
-    return payload
+def get_opt_level():
+    """Get the current VM optimization level."""
+    return _OPT_LEVEL
 
 
-def decode_cache_stats():
-    """Return (hits, misses, current_size) for decode cache."""
-    return (_DECODE_HITS, _DECODE_MISSES, len(_DECODE_CACHE))
+# Re-export cache stats from optimizer
+decode_cache_stats = _opt.decode_cache_stats
+optimize_cache_stats = _opt.optimize_cache_stats
+
+# Pre-fetch optimizer constants used in the hot dispatch loop
+_IR_OP = _opt.IR_OP
+_IR_ARG = _opt.IR_ARG
+_IR_OFFSET = _opt.IR_OFFSET
+_IR_FLAGS = _opt.IR_FLAGS
+_IR_JUMP = _opt.IR_JUMP
+_IR_EXTRA = _opt.IR_EXTRA
+_op_name = _opt.op_name
+
+# Superinstruction opcode IDs (cached for dispatch)
+_SUPER_LOAD_FAST_LOAD_FAST = _opt.SUPER_LOAD_FAST_LOAD_FAST
+_SUPER_LOAD_FAST_LOAD_CONST = _opt.SUPER_LOAD_FAST_LOAD_CONST
+_SUPER_LOAD_CONST_LOAD_FAST = _opt.SUPER_LOAD_CONST_LOAD_FAST
+_SUPER_LOAD_FAST_STORE_FAST = _opt.SUPER_LOAD_FAST_STORE_FAST
+_SUPER_STORE_FAST_LOAD_FAST = _opt.SUPER_STORE_FAST_LOAD_FAST
+_SUPER_STORE_FAST_STORE_FAST = _opt.SUPER_STORE_FAST_STORE_FAST
+_SUPER_LOAD_FAST_LOAD_FAST_BINARY_ADD = _opt.SUPER_LOAD_FAST_LOAD_FAST_BINARY_ADD
+_SUPER_LOAD_FAST_LOAD_CONST_COMPARE = _opt.SUPER_LOAD_FAST_LOAD_CONST_COMPARE
+_SUPER_LOAD_FAST_LOAD_ATTR = _opt.SUPER_LOAD_FAST_LOAD_ATTR
+_SUPER_LOAD_FAST_BINARY_SUBSCR = _opt.SUPER_LOAD_FAST_BINARY_SUBSCR
 
 
 def _get_builtins():
@@ -159,7 +127,9 @@ class Frame:
         self.block_stack = []
         self.name_dict = {}  # module-scope names keyed by index
         self.kw_names = ()
-        instructions, offset_to_index, argvals, exc_table = decode_cached(code)
+        # Use the optimizer's two-tier cache for IR instructions
+        instructions, offset_to_index, argvals, exc_table = _opt.optimize_cached(
+            code, opt_level=_OPT_LEVEL)
         self.instructions = instructions
         self.offset_to_index = offset_to_index
         self.argvals = argvals
@@ -668,17 +638,99 @@ def _run_frames(frames, builtins, log):
                 frames[-1].stack.append(None)
             continue
 
-        opname, arg, offset = f.instructions[f.ip]
+        _instr = f.instructions[f.ip]
+        op = _instr[_IR_OP]
+        arg = _instr[_IR_ARG]
+        offset = _instr[_IR_OFFSET]
         argval = f.argvals[f.ip]
         f.ip += 1
         stk = f.stack
+        opname = _op_name(op)
 
         try:  # __exc_handler__
 
             # ---------------------------------------------------------------
+            # Superinstructions (fused ops — Phase 4)
+            # ---------------------------------------------------------------
+            if op == _SUPER_LOAD_FAST_LOAD_FAST:
+                val = f.locals_fast[arg]
+                stk.append(val if val is not _UNSET else None)
+                val2 = f.locals_fast[_instr[_IR_EXTRA]]
+                stk.append(val2 if val2 is not _UNSET else None)
+
+            elif op == _SUPER_LOAD_FAST_LOAD_CONST:
+                val = f.locals_fast[arg]
+                stk.append(val if val is not _UNSET else None)
+                stk.append(f.code.co_consts[_instr[_IR_EXTRA]])
+
+            elif op == _SUPER_LOAD_CONST_LOAD_FAST:
+                stk.append(f.code.co_consts[arg])
+                val = f.locals_fast[_instr[_IR_EXTRA]]
+                stk.append(val if val is not _UNSET else None)
+
+            elif op == _SUPER_LOAD_FAST_STORE_FAST:
+                val = f.locals_fast[arg]
+                if val is _UNSET:
+                    val = None
+                f.locals_fast[_instr[_IR_EXTRA]] = val
+
+            elif op == _SUPER_STORE_FAST_LOAD_FAST:
+                f.locals_fast[arg] = stk.pop()
+                val = f.locals_fast[_instr[_IR_EXTRA]]
+                stk.append(val if val is not _UNSET else None)
+
+            elif op == _SUPER_STORE_FAST_STORE_FAST:
+                f.locals_fast[arg] = stk.pop()
+                f.locals_fast[_instr[_IR_EXTRA]] = stk.pop()
+
+            elif op == _SUPER_LOAD_FAST_LOAD_FAST_BINARY_ADD:
+                val_a = f.locals_fast[arg]
+                if val_a is _UNSET:
+                    val_a = None
+                val_b = f.locals_fast[_instr[_IR_EXTRA]]
+                if val_b is _UNSET:
+                    val_b = None
+                stk.append(val_a + val_b)
+
+            elif op == _SUPER_LOAD_FAST_LOAD_CONST_COMPARE:
+                val = f.locals_fast[arg]
+                if val is _UNSET:
+                    val = None
+                extra = _instr[_IR_EXTRA]
+                const_idx = extra >> 16
+                cmp_arg = extra & 0xFFFF
+                const_val = f.code.co_consts[const_idx]
+                op_name_cmp = CMP_OP[cmp_arg]
+                if   op_name_cmp == '<':      result = val < const_val
+                elif op_name_cmp == '<=':     result = val <= const_val
+                elif op_name_cmp == '==':     result = val == const_val
+                elif op_name_cmp == '!=':     result = val != const_val
+                elif op_name_cmp == '>':      result = val > const_val
+                elif op_name_cmp == '>=':     result = val >= const_val
+                elif op_name_cmp == 'in':     result = val in const_val
+                elif op_name_cmp == 'not in': result = val not in const_val
+                elif op_name_cmp == 'is':     result = val is const_val
+                elif op_name_cmp == 'is not': result = val is not const_val
+                else:                         result = False
+                stk.append(result)
+
+            elif op == _SUPER_LOAD_FAST_LOAD_ATTR:
+                val = f.locals_fast[arg]
+                if val is _UNSET:
+                    val = None
+                stk.append(getattr(val, f.code.co_names[_instr[_IR_EXTRA]]))
+
+            elif op == _SUPER_LOAD_FAST_BINARY_SUBSCR:
+                val = f.locals_fast[arg]
+                if val is _UNSET:
+                    val = None
+                key = stk.pop()
+                stk.append(val[key])
+
+            # ---------------------------------------------------------------
             # NOP / RESUME / PRECALL
             # ---------------------------------------------------------------
-            if opname == 'NOP' or opname == 'RESUME' or opname == 'PRECALL':
+            elif opname == 'NOP' or opname == 'RESUME' or opname == 'PRECALL':
                 pass
 
             # ---------------------------------------------------------------
