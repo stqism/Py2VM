@@ -3,6 +3,7 @@
 # Supports generators, coroutines, async generators, and all async opcodes.
 
 import dis as _dis_mod
+import opcode as _opcode_mod
 import types as _types_mod
 import weakref as _weakref_mod
 
@@ -47,6 +48,22 @@ class _StringIO:
 
 
 # ---------------------------------------------------------------------------
+# Specialized → base opcode mapping (CPython 3.11+ adaptive interpreter)
+# ---------------------------------------------------------------------------
+_SPECIALIZED_TO_BASE = {}
+try:
+    _base_opnames = set(_opcode_mod.opname)
+    for _spec in getattr(_opcode_mod, '_specialized_instructions', []):
+        _best = None
+        for _base in _base_opnames:
+            if _spec.startswith(_base) and (not _best or len(_base) > len(_best)):
+                _best = _base
+        if _best:
+            _SPECIALIZED_TO_BASE[_spec] = _best
+except Exception:
+    pass
+
+# ---------------------------------------------------------------------------
 # Bytecode decode cache (WeakKeyDictionary — auto-evicts when code object dies)
 # ---------------------------------------------------------------------------
 _DECODE_CACHE = _weakref_mod.WeakKeyDictionary()
@@ -63,15 +80,19 @@ def _decode_uncached(code):
     argvals: list of resolved argval per instruction (for jump targets).
     exc_table: list of (start, end, target, depth) tuples.
     """
-    raw = list(_dis_mod.get_instructions(code, adaptive=False,
-                                         show_caches=False))
+    raw = list(_dis_mod.get_instructions(code, adaptive=True,
+                                         show_caches=True))
     instructions = []
     offset_to_index = {}
     argvals = []
-    for idx, instr in enumerate(raw):
+    for instr in raw:
+        if instr.opname == 'CACHE':
+            continue
+        idx = len(instructions)
         offset_to_index[instr.offset] = idx
+        opname = _SPECIALIZED_TO_BASE.get(instr.opname, instr.opname)
         arg = instr.arg if instr.arg is not None else 0
-        instructions.append((instr.opname, arg, instr.offset))
+        instructions.append((opname, arg, instr.offset))
         argvals.append(instr.argval)
     exc_table = []
     if hasattr(code, 'co_exceptiontable') and code.co_exceptiontable:
