@@ -534,11 +534,11 @@ print(result)
 
 
 def test_differential_all_levels():
-    """Run differential tests at all opt levels."""
+    """Run differential tests at all opt levels (0-3)."""
     ok = True
     for label, source in DIFF_SOURCES:
         cpython_out, cpython_exc = run_cpython(source)
-        for level in [0, 1, 2]:
+        for level in [0, 1, 2, 3]:
             vm_out, vm_exc = run_vm_at_level(source, level)
             tag = "%s_L%d" % (label, level)
             if cpython_exc is not None:
@@ -577,7 +577,7 @@ def test_metamorphic():
     """Equivalent source programs produce the same output."""
     ok = True
     for label, src_a, src_b in METAMORPHIC_PAIRS:
-        for level in [0, 1, 2]:
+        for level in [0, 1, 2, 3]:
             out_a, exc_a = run_vm_at_level(src_a, level)
             out_b, exc_b = run_vm_at_level(src_b, level)
             tag = "%s_L%d" % (label, level)
@@ -587,6 +587,223 @@ def test_metamorphic():
             elif not assert_eq(tag, out_a, out_b):
                 ok = False
     return ok
+
+
+# ---------------------------------------------------------------------------
+# Experimental optimization tests
+# ---------------------------------------------------------------------------
+
+def test_inline_cache_load_global():
+    """Inline cache speeds up LOAD_GLOBAL across repeated calls."""
+    source = """
+x = 42
+def f():
+    return len([1, 2, 3]) + x
+# Call multiple times to hit the cache
+for _ in range(10):
+    print(f())
+"""
+    cpython_out, _ = run_cpython(source)
+    vm_out, _ = run_vm_at_level(source, 2)
+    return assert_eq("inline_cache_load_global", cpython_out, vm_out)
+
+
+def test_inline_cache_invalidation():
+    """Inline cache invalidates when globals change."""
+    source = """
+x = 10
+def f():
+    return x
+print(f())
+x = 20
+print(f())
+x = 30
+print(f())
+"""
+    cpython_out, _ = run_cpython(source)
+    vm_out, _ = run_vm_at_level(source, 2)
+    return assert_eq("inline_cache_invalidation", cpython_out, vm_out)
+
+
+def test_guarded_int_arithmetic():
+    """Guarded fast path for int arithmetic produces correct results."""
+    source = """
+def compute(n):
+    total = 0
+    for i in range(n):
+        total = total + i * 2 - 1
+        total = total // 3
+        total = total % 1000
+    return total
+print(compute(100))
+"""
+    cpython_out, _ = run_cpython(source)
+    for level in [0, 1, 2, 3]:
+        vm_out, _ = run_vm_at_level(source, level)
+        if not assert_eq("int_arith_L%d" % level, cpython_out, vm_out):
+            return False
+    return True
+
+
+def test_guarded_float_arithmetic():
+    """Guarded fast path for float arithmetic produces correct results."""
+    source = """
+def compute(n):
+    total = 0.0
+    for i in range(n):
+        total = total + float(i) * 2.5 - 1.1
+    return round(total, 6)
+print(compute(50))
+"""
+    cpython_out, _ = run_cpython(source)
+    for level in [0, 1, 2, 3]:
+        vm_out, _ = run_vm_at_level(source, level)
+        if not assert_eq("float_arith_L%d" % level, cpython_out, vm_out):
+            return False
+    return True
+
+
+def test_range_fast_path():
+    """Range loop fast path produces correct results."""
+    source = """
+# Basic range
+print(list(range(5)))
+
+# Range with start/stop
+result = []
+for i in range(2, 8):
+    result.append(i)
+print(result)
+
+# Range with step
+result = []
+for i in range(0, 20, 3):
+    result.append(i)
+print(result)
+
+# Negative step
+result = []
+for i in range(10, 0, -2):
+    result.append(i)
+print(result)
+
+# Empty range
+result = []
+for i in range(5, 2):
+    result.append(i)
+print(result)
+
+# Nested range loops
+total = 0
+for i in range(10):
+    for j in range(10):
+        total += i * j
+print(total)
+"""
+    cpython_out, _ = run_cpython(source)
+    for level in [0, 1, 2, 3]:
+        vm_out, _ = run_vm_at_level(source, level)
+        if not assert_eq("range_fast_L%d" % level, cpython_out, vm_out):
+            return False
+    return True
+
+
+def test_range_fast_path_break_continue():
+    """Range fast path works correctly with break and continue."""
+    source = """
+result = []
+for i in range(20):
+    if i % 3 == 0:
+        continue
+    if i > 10:
+        break
+    result.append(i)
+print(result)
+"""
+    cpython_out, _ = run_cpython(source)
+    vm_out, _ = run_vm_at_level(source, 2)
+    return assert_eq("range_fast_break_continue", cpython_out, vm_out)
+
+
+def test_tiered_execution():
+    """Tiered execution promotes hot code to higher opt levels."""
+    import py2vm
+    old_tier = py2vm._TIERING_ENABLED
+    old_level = py2vm.get_opt_level()
+    py2vm.set_tiering(True)
+    py2vm.set_opt_level(3)
+
+    source = """
+def hot_func(n):
+    s = 0
+    for i in range(n):
+        s += i
+    return s
+# Call many times to trigger tier promotion
+results = []
+for _ in range(30):
+    results.append(hot_func(10))
+print(results[0], results[-1])
+"""
+    cpython_out, _ = run_cpython(source)
+    vm_out, vm_exc = run_vm_at_level(source, 3)
+
+    py2vm.set_tiering(old_tier)
+    py2vm.set_opt_level(old_level)
+
+    if vm_exc:
+        print("FAIL [tiered_execution] VM raised: %s" % vm_exc)
+        return False
+    return assert_eq("tiered_execution", cpython_out, vm_out)
+
+
+def test_profiling_pipeline():
+    """Profiling collects data and synthesis creates superinstructions."""
+    ok = True
+
+    # Enable profiling
+    opt.enable_profiling()
+
+    # Run code to collect profiles
+    old_level = py2vm.get_opt_level()
+    py2vm.set_opt_level(0)
+    py2vm.set_tiering(False)
+
+    for _ in range(5):
+        run_vm_at_level("""
+def f(a, b):
+    return a + b
+for i in range(10):
+    f(i, i+1)
+""", 0)
+
+    opt.disable_profiling()
+    py2vm.set_opt_level(old_level)
+
+    pairs, triples, total = opt.get_profile_stats()
+    if total == 0:
+        print("FAIL [profiling_pipeline] no samples collected")
+        ok = False
+    else:
+        print("PASS [profiling_pipeline] (%d samples, %d pairs)" % (total, len(pairs)))
+
+    return ok
+
+
+def test_synthesized_correctness():
+    """Synthesized superinstructions produce correct results."""
+    # Ensure some synthesis has happened (from profiling test above)
+    n = opt.synthesize_superinstructions()
+
+    source = """
+def f(x, y):
+    return x + y * 2
+results = [f(i, i+1) for i in range(10)]
+print(results)
+"""
+    cpython_out, _ = run_cpython(source)
+    vm_out, _ = run_vm_at_level(source, 3)
+    return assert_eq("synth_correctness", cpython_out, vm_out)
 
 
 # ---------------------------------------------------------------------------
@@ -626,10 +843,24 @@ if __name__ == '__main__':
         # Cache
         test_decode_cache_hits,
         test_optimize_cache_keyed,
-        # Differential correctness
+        # Differential correctness (all levels 0-3)
         test_differential_all_levels,
-        # Metamorphic
+        # Metamorphic (all levels 0-3)
         test_metamorphic,
+        # Experimental: Inline caches
+        test_inline_cache_load_global,
+        test_inline_cache_invalidation,
+        # Experimental: Guarded arithmetic
+        test_guarded_int_arithmetic,
+        test_guarded_float_arithmetic,
+        # Experimental: Range fast path
+        test_range_fast_path,
+        test_range_fast_path_break_continue,
+        # Experimental: Tiered execution
+        test_tiered_execution,
+        # Experimental: Profiling + synthesis
+        test_profiling_pipeline,
+        test_synthesized_correctness,
     ]
 
     passed = 0

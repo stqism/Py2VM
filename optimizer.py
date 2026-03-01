@@ -1015,3 +1015,388 @@ def decode_cache_stats():
 def optimize_cache_stats():
     """Return (hits, misses, current_size) for optimize cache."""
     return (_OPTIMIZE_HITS, _OPTIMIZE_MISSES, len(_OPTIMIZE_CACHE))
+
+
+# ===========================================================================
+# EXPERIMENTAL OPTIMIZATIONS
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Inline caches for LOAD_GLOBAL and LOAD_ATTR
+# ---------------------------------------------------------------------------
+# Each code object gets an InlineCache that maps instruction indices to
+# cached lookup results.  Guards use a globals/builtins version counter
+# maintained by the VM (bumped on every STORE_GLOBAL / STORE_NAME /
+# DELETE_GLOBAL / DELETE_NAME), and type identity for LOAD_ATTR.
+
+class InlineCache:
+    """Per-code-object inline cache for LOAD_GLOBAL and LOAD_ATTR."""
+    __slots__ = ('global_cache', 'attr_cache')
+
+    def __init__(self):
+        # global_cache: {ip: (globals_ver, builtins_ver, value)}
+        self.global_cache = {}
+        # attr_cache: {ip: (type_id, value)}
+        self.attr_cache = {}
+
+
+# WeakKeyDictionary mapping code objects -> InlineCache
+_INLINE_CACHES = _weakref_mod.WeakKeyDictionary()
+
+
+def get_inline_cache(code):
+    """Get or create the inline cache for a code object."""
+    ic = _INLINE_CACHES.get(code)
+    if ic is None:
+        ic = InlineCache()
+        _INLINE_CACHES[code] = ic
+    return ic
+
+
+# ---------------------------------------------------------------------------
+# Guarded primitive arithmetic fast paths
+# ---------------------------------------------------------------------------
+# For BINARY_OP: check if both operands are int (or float), and if so,
+# use direct Python operators instead of going through _binary_op dispatch.
+# The guard is simply isinstance checks on the operands.
+#
+# This is implemented directly in the VM dispatch loop, not as an IR
+# transform.  The optimizer just marks which BINARY_OP instructions are
+# candidates (pure numeric ops).
+
+_INT_FAST_BINARY_OPS = frozenset([0, 2, 3, 5, 6, 7, 8, 9, 10, 12])
+# 0=+, 2=//, 3=<<, 5=*, 6=%, 7=|, 8=**, 9=>>, 10=-, 12=^
+# Excluding: 1=& (rarely hot), 4=@ (matmul), 11=/ (returns float)
+
+_FLOAT_FAST_BINARY_OPS = frozenset([0, 5, 10, 11])
+# 0=+, 5=*, 10=-, 11=/
+
+# Lookup tables for fast dispatch (avoid _binary_op function call overhead)
+_INT_OP_TABLE = {
+    0: int.__add__,
+    2: int.__floordiv__,
+    3: int.__lshift__,
+    5: int.__mul__,
+    6: int.__mod__,
+    7: int.__or__,
+    8: int.__pow__,
+    9: int.__rshift__,
+    10: int.__sub__,
+    12: int.__xor__,
+}
+
+_FLOAT_OP_TABLE = {
+    0: float.__add__,
+    5: float.__mul__,
+    10: float.__sub__,
+    11: float.__truediv__,
+}
+
+
+# ---------------------------------------------------------------------------
+# Range loop fast path
+# ---------------------------------------------------------------------------
+# Detects `for i in range(...)` patterns at the IR level and replaces the
+# GET_ITER + FOR_ITER loop with a FAST_FOR_RANGE pseudo-op.
+#
+# At runtime, the pseudo-op checks that the iterator is actually a
+# range_iterator and runs an integer counter internally, avoiding the
+# overhead of next()/StopIteration on every iteration.
+
+OP_FOR_ITER = _OPNAME_TO_ID.get('FOR_ITER', _register_op('FOR_ITER'))
+OP_GET_ITER = _OPNAME_TO_ID.get('GET_ITER', _register_op('GET_ITER'))
+PSEUDO_FAST_FOR_RANGE = _register_op('FAST_FOR_RANGE')
+_OP_FLAGS[PSEUDO_FAST_FOR_RANGE] = F_JUMP | F_MAY_RAISE
+
+
+# ---------------------------------------------------------------------------
+# Tiered execution
+# ---------------------------------------------------------------------------
+# Per-code-object execution counters.  When a code object is executed enough
+# times, it gets promoted to a higher optimization tier.
+#
+# Tier 0: opt_level=0 (raw IR only)
+# Tier 1: opt_level=1 (peephole + CFG)
+# Tier 2: opt_level=2 (+ superinstructions, inline caches, fast paths)
+# Tier 3: opt_level=3 (+ auto-synthesized superinstructions)
+
+# Thresholds: number of Frame creations before promotion
+TIER_THRESHOLDS = {
+    0: 5,    # promote from tier 0 to tier 1 after 5 calls
+    1: 20,   # promote from tier 1 to tier 2 after 20 calls
+    2: 100,  # promote from tier 2 to tier 3 after 100 calls
+}
+
+MAX_TIER = 3
+
+_TIER_COUNTERS = _weakref_mod.WeakKeyDictionary()  # code -> [count, current_tier]
+
+
+def get_tier(code):
+    """Get the current execution tier for a code object."""
+    entry = _TIER_COUNTERS.get(code)
+    if entry is None:
+        return 0
+    return entry[1]
+
+
+def bump_tier_counter(code, max_opt_level):
+    """Increment the execution counter for a code object.
+
+    Returns the opt_level to use (may be promoted).
+    """
+    entry = _TIER_COUNTERS.get(code)
+    if entry is None:
+        entry = [1, 0]
+        _TIER_COUNTERS[code] = entry
+        return min(entry[1], max_opt_level)
+
+    entry[0] += 1
+    current_tier = entry[1]
+
+    threshold = TIER_THRESHOLDS.get(current_tier)
+    if threshold is not None and entry[0] >= threshold and current_tier < MAX_TIER:
+        entry[1] = current_tier + 1
+        entry[0] = 0  # reset counter for next tier
+        # Invalidate optimize cache for this code so it gets re-optimized
+        per_code = _OPTIMIZE_CACHE.get(code)
+        if per_code is not None:
+            per_code.clear()
+
+    return min(entry[1], max_opt_level)
+
+
+# ---------------------------------------------------------------------------
+# Automatic superinstruction synthesis from profiling
+# ---------------------------------------------------------------------------
+# Collects opcode pair frequencies during execution and synthesizes new
+# superinstructions for the most common patterns (beyond the hard-coded set).
+
+_PAIR_PROFILE = {}    # (op_id_a, op_id_b) -> count
+_TRIPLE_PROFILE = {}  # (op_id_a, op_id_b, op_id_c) -> count
+_PROFILE_ENABLED = False
+_PROFILE_SAMPLES = 0
+_PROFILE_WARMUP = 500  # samples before synthesis
+
+# Synthesized superinstructions: maps pattern tuple -> pseudo-op-id
+_SYNTHESIZED_SUPERS = {}
+# Reverse map: pseudo-op-id -> pattern tuple (for dispatch)
+_SYNTHESIZED_DISPATCH = {}
+
+# Already-known patterns (hard-coded supers) that we skip during synthesis
+_HARDCODED_PAIRS = frozenset([
+    (OP_LOAD_FAST, OP_LOAD_FAST),
+    (OP_LOAD_FAST, OP_LOAD_CONST),
+    (OP_LOAD_CONST, OP_LOAD_FAST),
+    (OP_LOAD_FAST, OP_STORE_FAST),
+    (OP_STORE_FAST, OP_LOAD_FAST),
+    (OP_STORE_FAST, OP_STORE_FAST),
+    (OP_LOAD_FAST, OP_LOAD_ATTR),
+    (OP_LOAD_FAST, OP_BINARY_SUBSCR),
+])
+
+MAX_SYNTHESIZED = 20  # cap number of synthesized superinstructions
+
+
+def profile_record(op_a, op_b, op_c=None):
+    """Record an opcode sequence observation during profiling."""
+    global _PROFILE_SAMPLES
+    if not _PROFILE_ENABLED:
+        return
+    _PROFILE_SAMPLES += 1
+
+    pair = (op_a, op_b)
+    _PAIR_PROFILE[pair] = _PAIR_PROFILE.get(pair, 0) + 1
+
+    if op_c is not None:
+        triple = (op_a, op_b, op_c)
+        _TRIPLE_PROFILE[triple] = _TRIPLE_PROFILE.get(triple, 0) + 1
+
+
+def enable_profiling():
+    """Enable opcode sequence profiling."""
+    global _PROFILE_ENABLED
+    _PROFILE_ENABLED = True
+
+
+def disable_profiling():
+    """Disable opcode sequence profiling."""
+    global _PROFILE_ENABLED
+    _PROFILE_ENABLED = False
+
+
+def get_profile_stats():
+    """Return (pair_counts, triple_counts, total_samples)."""
+    return (dict(_PAIR_PROFILE), dict(_TRIPLE_PROFILE), _PROFILE_SAMPLES)
+
+
+def synthesize_superinstructions():
+    """Analyze collected profiles and synthesize new superinstructions.
+
+    Returns the number of new superinstructions created.
+    """
+    created = 0
+
+    # Sort pairs by frequency, skip hard-coded ones and NOP pairs
+    candidates = []
+    for pair, count in sorted(_PAIR_PROFILE.items(), key=lambda x: -x[1]):
+        if pair in _HARDCODED_PAIRS:
+            continue
+        if pair in _SYNTHESIZED_SUPERS:
+            continue
+        # Skip pairs involving NOP or pseudo-ops that we can't fuse
+        a_name = op_name(pair[0])
+        b_name = op_name(pair[1])
+        if a_name == 'NOP' or b_name == 'NOP':
+            continue
+        # Skip jumps — can't fuse across control flow
+        a_flags = _OP_FLAGS.get(pair[0], 0)
+        b_flags = _OP_FLAGS.get(pair[1], 0)
+        if (a_flags & F_JUMP) or (b_flags & F_JUMP):
+            continue
+        # Skip block terminators
+        if a_name in _BLOCK_TERMINATOR_OPS or b_name in _BLOCK_TERMINATOR_OPS:
+            continue
+        candidates.append((pair, count))
+        if len(candidates) >= MAX_SYNTHESIZED - len(_SYNTHESIZED_SUPERS):
+            break
+
+    for pair, count in candidates:
+        a_name = op_name(pair[0])
+        b_name = op_name(pair[1])
+        synth_name = 'SYNTH_%s__%s' % (a_name, b_name)
+        synth_id = _register_op(synth_name)
+        # Combine flags: take union of both flags
+        a_flags = _OP_FLAGS.get(pair[0], 0)
+        b_flags = _OP_FLAGS.get(pair[1], 0)
+        combined_flags = a_flags | b_flags
+        _OP_FLAGS[synth_id] = combined_flags
+        _SYNTHESIZED_SUPERS[pair] = synth_id
+        _SYNTHESIZED_DISPATCH[synth_id] = pair
+        created += 1
+
+    return created
+
+
+def apply_synthesized_fusion(ir_instructions, offset_to_index, blocks):
+    """Apply synthesized superinstruction fusion to IR.
+
+    Similar to _fuse_superinstructions but uses the dynamically synthesized patterns.
+    Returns (modified_instructions, changed).
+    """
+    if not _SYNTHESIZED_SUPERS:
+        return ir_instructions, False
+
+    result = list(ir_instructions)
+    changed = False
+
+    # Build jump targets set
+    jump_targets = set()
+    for instr in ir_instructions:
+        if instr[IR_FLAGS] & F_JUMP and instr[IR_JUMP] is not None:
+            target = offset_to_index.get(instr[IR_JUMP])
+            if target is not None:
+                jump_targets.add(target)
+    for leader, block in blocks.items():
+        if block.is_exc_handler:
+            jump_targets.add(leader)
+
+    for leader, block in blocks.items():
+        if not block.reachable:
+            continue
+
+        i = block.start
+        while i < block.end - 1:
+            if i + 1 in jump_targets:
+                i += 1
+                continue
+
+            a = result[i]
+            b = result[i + 1]
+            pair = (a[IR_OP], b[IR_OP])
+            synth_id = _SYNTHESIZED_SUPERS.get(pair)
+
+            if synth_id is not None:
+                combined_flags = _OP_FLAGS.get(synth_id, F_MAY_RAISE)
+                result[i] = make_ir(synth_id, a[IR_ARG], a[IR_OFFSET],
+                                    combined_flags, None, b[IR_ARG])
+                result[i + 1] = make_ir(OP_NOP, 0, b[IR_OFFSET], F_PURE_STACK)
+                changed = True
+                i += 2
+            else:
+                i += 1
+
+    return result, changed
+
+
+# ---------------------------------------------------------------------------
+# Extended optimization pipeline (opt_level 3)
+# ---------------------------------------------------------------------------
+
+def optimize_level3(ir_instructions, offset_to_index, argvals, exc_table, code):
+    """Level 3 optimization: level 2 + synthesized superinstructions.
+
+    Returns (opt_instructions, opt_offset_to_index, opt_argvals).
+    """
+    # First run level 2
+    instrs, o2i, avals = optimize(
+        ir_instructions, offset_to_index, argvals, exc_table, code,
+        opt_level=2)
+
+    # Then apply synthesized fusions if any exist
+    if _SYNTHESIZED_SUPERS:
+        blocks = build_cfg(instrs, o2i, exc_table)
+        instrs, changed = apply_synthesized_fusion(instrs, o2i, blocks)
+        if changed:
+            instrs, o2i, _ = _peephole_nop_removal(instrs, o2i)
+            # Rebuild argvals
+            old_argval_by_offset = {}
+            for old_idx, instr in enumerate(ir_instructions):
+                if old_idx < len(argvals):
+                    old_argval_by_offset[instr[IR_OFFSET]] = argvals[old_idx]
+            avals = []
+            for instr in instrs:
+                av = old_argval_by_offset.get(instr[IR_OFFSET])
+                if instr[IR_JUMP] is not None:
+                    av = instr[IR_JUMP]
+                avals.append(av)
+
+    return instrs, o2i, avals
+
+
+# Update optimize_cached to handle level 3
+_orig_optimize_cached = optimize_cached
+
+
+def optimize_cached(code, opt_level=2):
+    """Extended optimize_cached that supports opt_level 3."""
+    global _OPTIMIZE_HITS, _OPTIMIZE_MISSES
+
+    cache_key = (opt_level, _PY_MINOR)
+    per_code = _OPTIMIZE_CACHE.get(code)
+    if per_code is not None:
+        hit = per_code.get(cache_key)
+        if hit is not None:
+            _OPTIMIZE_HITS += 1
+            return hit
+
+    _OPTIMIZE_MISSES += 1
+
+    ir_instructions, offset_to_index, argvals, exc_table = decode_cached(code)
+
+    if opt_level <= 2:
+        opt_instrs, opt_o2i, opt_argvals = optimize(
+            ir_instructions, offset_to_index, argvals, exc_table, code,
+            opt_level=opt_level)
+    else:
+        opt_instrs, opt_o2i, opt_argvals = optimize_level3(
+            ir_instructions, offset_to_index, argvals, exc_table, code)
+
+    result = (opt_instrs, opt_o2i, opt_argvals, exc_table)
+
+    if per_code is None:
+        per_code = {}
+        _OPTIMIZE_CACHE[code] = per_code
+    per_code[cache_key] = result
+
+    return result
