@@ -167,7 +167,7 @@ def time_cpython(source, n_iter=5):
     return best
 
 
-def time_py2vm(source, opt_level, tiering, n_iter=5):
+def time_py2vm(source, opt_level, tiering, n_iter=5, profile_warmup=False):
     """Time Py2VM execution of the source, return best-of-n in seconds."""
     import py2vm
     import optimizer as opt
@@ -185,6 +185,18 @@ def time_py2vm(source, opt_level, tiering, n_iter=5):
     opt._TIER_COUNTERS.clear() if hasattr(opt, '_TIER_COUNTERS') else None
 
     code_obj = compile(source, "<bench>", "exec")
+
+    # For opt=3: run a profiling warmup pass, then synthesize
+    if profile_warmup:
+        opt.enable_profiling()
+        py2vm.set_opt_level(2)
+        py2vm.py2vm(code_obj)
+        opt.disable_profiling()
+        opt.synthesize_superinstructions()
+        py2vm.set_opt_level(opt_level)
+        # Clear optimize cache so opt=3 picks up new synth supers
+        opt._OPTIMIZE_CACHE.clear() if hasattr(opt, '_OPTIMIZE_CACHE') else None
+
     best = float("inf")
     for _ in range(n_iter):
         # Clear caches between runs for consistent measurement
@@ -206,12 +218,14 @@ def time_py2vm(source, opt_level, tiering, n_iter=5):
 # ---------------------------------------------------------------------------
 
 def run_benchmarks():
+    # (label, opt_level, tiering, profile_warmup)
     configs = [
-        ("CPython",               None, None),
-        ("Py2VM opt=0 (baseline)", 0,   False),
-        ("Py2VM opt=1 (peephole)", 1,   False),
-        ("Py2VM opt=2 (+supers)",  2,   False),
-        ("Py2VM opt=2 +tiering",   2,   True),
+        ("CPython",                None, None,  False),
+        ("Py2VM opt=0 (baseline)", 0,    False, False),
+        ("Py2VM opt=1 (peephole)", 1,    False, False),
+        ("Py2VM opt=2 (+supers)",  2,    False, False),
+        ("Py2VM opt=2 +tiering",   2,    True,  False),
+        ("Py2VM opt=3 (+synth)",   3,    False, True),
     ]
 
     # Collect results: {bench_name: {config_label: time_secs}}
@@ -223,11 +237,12 @@ def run_benchmarks():
         results[bench_name] = {}
         sys.stdout.write(f"  {bench_name:<20s}")
         sys.stdout.flush()
-        for label, opt_level, tiering in configs:
+        for label, opt_level, tiering, profile_warmup in configs:
             if opt_level is None:
                 t = time_cpython(source)
             else:
-                t = time_py2vm(source, opt_level, tiering)
+                t = time_py2vm(source, opt_level, tiering,
+                               profile_warmup=profile_warmup)
             results[bench_name][label] = t
             sys.stdout.write(".")
             sys.stdout.flush()
